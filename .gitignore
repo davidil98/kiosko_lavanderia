@@ -3,3 +3,4 @@ __pycache__
 .env
 ecoluna_datos.db
 .DS_Store
+*.code-workspace

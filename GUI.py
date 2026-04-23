@@ -188,13 +188,16 @@ class StepPago(ctk.CTkFrame):
     # Simulación de introducción de dinero
     def sync_counter(self, event):
         coins_list = [1, 2, 5, 10]
-        if int(event.char.isdigit()) in coins_list:
-            credit = int(event.char)
-            self.counter += credit
-            self.counter_lbl.configure(text=f"${self.counter}")
+        try:
+            if int(event.char) in coins_list:
+                credit = int(event.char)
+                self.counter += credit
+                self.counter_lbl.configure(text=f"${self.counter}")
             
             # (Opcional) Guardar el dinero en la sesión general si lo necesitas
             self.app.session_data["dinero_ingresado"] = self.counter
+        except ValueError:
+            pass
         
         # Si el usuario introduce todo el dinero, activamos el botón de pagar
         if self.counter >= int(self.app.session_data.get("precio", "$0").strip("$")):
