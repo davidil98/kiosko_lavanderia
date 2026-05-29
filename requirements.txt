@@ -1,4 +1,8 @@
+colorzero==2.0
 customtkinter==5.2.2
 darkdetect==0.8.0
+gpiozero==2.0.1
+lgpio==0.2.2.0
 packaging==26.1
 pillow==12.2.0
+rpi-lgpio==0.6
