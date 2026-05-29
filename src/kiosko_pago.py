@@ -174,21 +174,23 @@ class StepPago(ctk.CTkFrame):
         self.instructions_label = ctk.CTkLabel(self, text="Realice su pago", font=("Helvetica", 24))
         self.instructions_label.pack(pady=(40, 20))
 
-        self.status_lbl = ctk.CTkLabel(self, text="Esperando monedas...", font=("Helvetica", 16))
+        self.status_lbl = ctk.CTkLabel(self, text="Esperando monedas/billetes...", font=("Helvetica", 16))
         self.status_lbl.pack(pady=(20, 18))
 
-        # --- Variables lógicas del monedero ---
-        self.pulsos_temporales = 0
-        self.ultimo_tiempo = 0
-        self.diccionario_monedas = {2: 1, 4: 2, 6: 5, 8: 10} # {Pulsos: Valor}
-        self.timer_id = None # Para manejar el after de tkinter
+        self.counter = 0
 
-        # Variables visuales
-        self.counter_lbl = ctk.CTkLabel(self, text="$0", font=("Helvetica", 24, "bold"))
+        self.counter_lbl = ctk.CTkLabel(self, text=f"${self.counter}", font=("Helvetica", 24, "bold"))
         self.counter_lbl.pack(pady=(10, 5))
 
+        # Inicializamos el label vacío, lo llenaremos en on_show
         self.total_lbl = ctk.CTkLabel(self, text="Total a pagar: ", font=("Helvetica", 16))
         self.total_lbl.pack(pady=(5, 0))
+
+        # Variables para el monedero por hardware
+        self.pulsos = 0
+        self.ultimo_tiempo = 0
+        self.diccionario_monedas = {2: 1, 4: 2, 6: 5, 8: 10}
+        self.after_id = None
 
         # Contenedor para botones
         self.nav_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -197,79 +199,40 @@ class StepPago(ctk.CTkFrame):
         self.btn_back = ctk.CTkButton(self.nav_frame, text="Cancelar y Regresar", font=("Helvetica", 18), fg_color="red", hover_color="darkred", width=200, command=self._confirm_back)
         self.btn_back.pack(side="left", padx=50)
 
-        self.btn_next = ctk.CTkButton(self.nav_frame, text="Pagar", font=("Helvetica", 18), state="disabled", width=200, command=self.app.next_step)
+        # Botón para continuar
+        self.btn_next = ctk.CTkButton(self.nav_frame, text="Pagar", font=("Helvetica", 18), state="disabled", width=200, command=self._confirm_next)
         self.btn_next.pack(side="right", padx=50)
 
-    # --- Lógica de Interrupciones de Hardware ---
-    def registrar_pulso_fisico(self):
-        """Esta función será llamada por gpiozero cada vez que el pin caiga a GND."""
-        self.pulsos_temporales += 1
+    def registrar_pulso(self):
+        self.pulsos += 1
         self.ultimo_tiempo = time.time()
-        print(f"Pulso en hardware detectado. Acumulados: {self.pulsos_temporales}")
 
     def procesar_ventana_tiempo(self):
-        """Revisa constantemente si terminó de caer la moneda."""
-        if self.pulsos_temporales > 0 and (time.time() - self.ultimo_tiempo) > 0.4:
-            # La ventana de 400ms se cerró
-            if self.pulsos_temporales in self.diccionario_monedas:
-                valor_ingresado = self.diccionario_monedas[self.pulsos_temporales]
-                print(f"Moneda validada: ${valor_ingresado}")
-                
-                # Actualizar el dinero total en la sesión
-                dinero_actual = self.app.session_data.get("dinero_ingresado", 0)
-                self.app.session_data["dinero_ingresado"] = dinero_actual + valor_ingresado
-                
-                # Actualizar la interfaz (CustomTkinter debe actualizarse en el hilo principal)
-                self.actualizar_ui()
+        if self.pulsos > 0 and (time.time() - self.ultimo_tiempo) > 0.4:
+            if self.pulsos in self.diccionario_monedas:
+                valor = self.diccionario_monedas[self.pulsos]
+                self.agregar_saldo(valor)
             else:
-                print(f"Error de lectura: {self.pulsos_temporales} pulsos no reconocidos.")
+                print(f"❌ Error de lectura (Pulsos: {self.pulsos})")
+            self.pulsos = 0
             
-            # Resetear la ventana de tiempo para la siguiente moneda
-            self.pulsos_temporales = 0
+        self.after_id = self.after(100, self.procesar_ventana_tiempo)
 
-        # Vuelve a llamarse a sí misma cada 100ms mientras esté en la pantalla de pago
-        self.timer_id = self.after(100, self.procesar_ventana_tiempo)
-
-    def actualizar_ui(self):
-        """Actualiza los textos y botones en pantalla."""
-        ingresado = self.app.session_data.get("dinero_ingresado", 0)
-        self.counter_lbl.configure(text=f"${ingresado}")
+    def agregar_saldo(self, valor):
+        self.counter += valor
+        self.counter_lbl.configure(text=f"${self.counter}")
+        self.app.session_data["dinero_ingresado"] = self.counter
         
         try:
-            precio_objetivo = int(self.app.session_data.get("precio", "$0").replace('$', '').strip())
+            precio = int(self.app.session_data.get("precio", "$0").replace('$', '').strip())
         except ValueError:
-            precio_objetivo = 0
+            precio = 0
 
-        if ingresado >= precio_objetivo:
+        if self.counter >= precio:
             self.btn_next.configure(state="normal")
-            # Podrías autolanzar el siguiente paso aquí si quieres:
-            # self.app.next_step()
-
-    # --- Manejo del ciclo de vida de la pantalla ---
-    def on_show(self):
-        """Se ejecuta al entrar a la pantalla de pago."""
-        precio = self.app.session_data.get("precio", "$0")
-        self.total_lbl.configure(text=f"Total a pagar: {precio}")
-        self.actualizar_ui()
         
-        # Enlazar el hardware a nuestra función si existe
-        if monedero_hardware:
-            monedero_hardware.when_pressed = self.registrar_pulso_fisico
-            
-        # Iniciar el bucle de revisión de la ventana de tiempo
-        self.procesar_ventana_tiempo()
-
-    def _confirm_back(self):
-        """Se ejecuta al salir de la pantalla de pago hacia atrás."""
-        respuesta = messagebox.askyesno("Advertencia", "¿Estás seguro de regresar?")
-        if respuesta:
-            # Desvincular el hardware y detener el timer para no gastar recursos
-            if monedero_hardware:
-                monedero_hardware.when_pressed = None
-            if self.timer_id:
-                self.after_cancel(self.timer_id)
-            
-            self.app.prev_step()
+        if self.counter > precio:
+            messagebox.showinfo("Dinero ingresado", "Has ingresado más dinero del necesario. Por favor, presiona 'pagar' o cancela en tragamonedas para retirar el excedente y volver a intentar.")
 
     # Simulación de introducción de dinero
     def sync_counter(self, event):
@@ -277,28 +240,27 @@ class StepPago(ctk.CTkFrame):
         try:
             if int(event.char) in coins_list:
                 credit = int(event.char)
-                self.counter += credit
-                self.counter_lbl.configure(text=f"${self.counter}")
-            
-            # (Opcional) Guardar el dinero en la sesión general si lo necesitas
-            self.app.session_data["dinero_ingresado"] = self.counter
+                self.agregar_saldo(credit)
         except ValueError:
             pass
-        
-        # Si el usuario introduce todo el dinero, activamos el botón de pagar
-        if self.counter >= int(self.app.session_data.get("precio", "$0").strip("$")):
-            self.btn_next.configure(state="normal")
-        
-        # Si el usuario introduce más dinero del necesario, notificamos con ventana emergente
-        if self.counter > int(self.app.session_data.get("precio", "$0").strip("$")):
-            messagebox.showinfo("Dinero ingresado", "Has ingresado más dinero del necesario. Por favor, presiona 'pagar' o cancela en tragamonedas para retirar el excedente y volver a intentar.")
+
+    def _cleanup_hardware(self):
+        self.app.unbind("<Key>")
+        if monedero_hardware:
+            monedero_hardware.when_pressed = None
+        if self.after_id:
+            self.after_cancel(self.after_id)
+            self.after_id = None
+
+    def _confirm_next(self):
+        self._cleanup_hardware()
+        self.app.next_step()
 
     def _confirm_back(self):
         # Ventana emergente de advertencia nativa
         respuesta = messagebox.askyesno("Advertencia", "Si regresas podrías perder el dinero ingresado. ¿Estás seguro de regresar e intentar reclamar la devolución?")
         if respuesta:
-            # Quitamos el evento del teclado antes de irnos para que no siga escuchando en otras pantallas
-            self.app.unbind("<Key>")
+            self._cleanup_hardware()
             self.app.prev_step()
 
     def on_show(self):
@@ -310,7 +272,15 @@ class StepPago(ctk.CTkFrame):
         self.counter = 0
         self.counter_lbl.configure(text=f"${self.counter}")
         
-        # 3. ¡LA CLAVE! Le decimos a la ventana principal (app) que escuche el teclado
+        # 3. Reiniciamos las variables de hardware
+        self.pulsos = 0
+        if monedero_hardware:
+            monedero_hardware.when_pressed = self.registrar_pulso
+            if self.after_id:
+                self.after_cancel(self.after_id)
+            self.procesar_ventana_tiempo()
+
+        # 4. ¡LA CLAVE! Le decimos a la ventana principal (app) que escuche el teclado
         # y envíe los eventos a nuestra función sync_counter
         self.app.bind("<Key>", self.sync_counter)
 
