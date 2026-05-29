@@ -5,7 +5,7 @@ from time import time, sleep
 # con PULL_UP interno y lo conecta a eventos de hardware.
 # bounce_time=0.05 ignora pulsos falsos menores a 50ms.
 PIN_MONEDERO = 17
-monedero = Button(PIN_MONEDERO, bounce_time=0.05)
+monedero = Button(PIN_MONEDERO)
 
 class LectorMonedas:
     def __init__(self):
