@@ -2,7 +2,7 @@ import sqlite3
 import datetime
 import os
 
-DB_PATH = "ecoluna_datos.db"
+DB_PATH = os.path.join("data","ecoluna_datos.db")
 
 def inicializar_bd():
     """Crea la base de datos y la tabla si no existen."""

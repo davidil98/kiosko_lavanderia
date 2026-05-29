@@ -5,6 +5,19 @@ from PIL import Image
 import os
 from tkinter import messagebox
 import database
+from gpiozero import Button
+from gpiozero import BadPinFactory
+from time import time
+
+# --- HardwareGPIO ---
+PIN_MONEDERO = 17
+try:
+    monedero_hardware = Button(PIN_MONEDERO)
+except BadPinFactory as e:
+    print(f"Error Type: {type(e).__name__}")
+    print(f"Advertencia: Hardware GPIO no disponible. Error: {e}")
+    monedero_hardware = None
+    exit()
 
 # --- Carga de medios ---
 IMG_LOGO_PATH = os.path.join("media", "logo_slogan.png")
@@ -162,15 +175,19 @@ class StepPago(ctk.CTkFrame):
         self.instructions_label = ctk.CTkLabel(self, text="Realice su pago", font=("Helvetica", 24))
         self.instructions_label.pack(pady=(40, 20))
 
-        self.status_lbl = ctk.CTkLabel(self, text="Esperando monedas/billetes...", font=("Helvetica", 16))
+        self.status_lbl = ctk.CTkLabel(self, text="Esperando monedas...", font=("Helvetica", 16))
         self.status_lbl.pack(pady=(20, 18))
 
-        self.counter = 0
+        # --- Variables lógicas del monedero ---
+        self.pulsos_temporales = 0
+        self.ultimo_tiempo = 0
+        self.diccionario_monedas = {2: 1, 4: 2, 6: 5, 8: 10} # {Pulsos: Valor}
+        self.timer_id = None # Para manejar el after de tkinter
 
-        self.counter_lbl = ctk.CTkLabel(self, text=f"${self.counter}", font=("Helvetica", 24, "bold"))
+        # Variables visuales
+        self.counter_lbl = ctk.CTkLabel(self, text="$0", font=("Helvetica", 24, "bold"))
         self.counter_lbl.pack(pady=(10, 5))
 
-        # Inicializamos el label vacío, lo llenaremos en on_show
         self.total_lbl = ctk.CTkLabel(self, text="Total a pagar: ", font=("Helvetica", 16))
         self.total_lbl.pack(pady=(5, 0))
 
@@ -181,9 +198,79 @@ class StepPago(ctk.CTkFrame):
         self.btn_back = ctk.CTkButton(self.nav_frame, text="Cancelar y Regresar", font=("Helvetica", 18), fg_color="red", hover_color="darkred", width=200, command=self._confirm_back)
         self.btn_back.pack(side="left", padx=50)
 
-        # Botón para simular pago exitoso
         self.btn_next = ctk.CTkButton(self.nav_frame, text="Pagar", font=("Helvetica", 18), state="disabled", width=200, command=self.app.next_step)
         self.btn_next.pack(side="right", padx=50)
+
+    # --- Lógica de Interrupciones de Hardware ---
+    def registrar_pulso_fisico(self):
+        """Esta función será llamada por gpiozero cada vez que el pin caiga a GND."""
+        self.pulsos_temporales += 1
+        self.ultimo_tiempo = time()
+        print(f"Pulso en hardware detectado. Acumulados: {self.pulsos_temporales}")
+
+    def procesar_ventana_tiempo(self):
+        """Revisa constantemente si terminó de caer la moneda."""
+        if self.pulsos_temporales > 0 and (time() - self.ultimo_tiempo) > 0.4:
+            # La ventana de 400ms se cerró
+            if self.pulsos_temporales in self.diccionario_monedas:
+                valor_ingresado = self.diccionario_monedas[self.pulsos_temporales]
+                print(f"Moneda validada: ${valor_ingresado}")
+                
+                # Actualizar el dinero total en la sesión
+                dinero_actual = self.app.session_data.get("dinero_ingresado", 0)
+                self.app.session_data["dinero_ingresado"] = dinero_actual + valor_ingresado
+                
+                # Actualizar la interfaz (CustomTkinter debe actualizarse en el hilo principal)
+                self.actualizar_ui()
+            else:
+                print(f"Error de lectura: {self.pulsos_temporales} pulsos no reconocidos.")
+            
+            # Resetear la ventana de tiempo para la siguiente moneda
+            self.pulsos_temporales = 0
+
+        # Vuelve a llamarse a sí misma cada 100ms mientras esté en la pantalla de pago
+        self.timer_id = self.after(100, self.procesar_ventana_tiempo)
+
+    def actualizar_ui(self):
+        """Actualiza los textos y botones en pantalla."""
+        ingresado = self.app.session_data.get("dinero_ingresado", 0)
+        self.counter_lbl.configure(text=f"${ingresado}")
+        
+        try:
+            precio_objetivo = int(self.app.session_data.get("precio", "$0").replace('$', '').strip())
+        except ValueError:
+            precio_objetivo = 0
+
+        if ingresado >= precio_objetivo:
+            self.btn_next.configure(state="normal")
+            # Podrías autolanzar el siguiente paso aquí si quieres:
+            # self.app.next_step()
+
+    # --- Manejo del ciclo de vida de la pantalla ---
+    def on_show(self):
+        """Se ejecuta al entrar a la pantalla de pago."""
+        precio = self.app.session_data.get("precio", "$0")
+        self.total_lbl.configure(text=f"Total a pagar: {precio}")
+        self.actualizar_ui()
+        
+        # Enlazar el hardware a nuestra función si existe
+        if monedero_hardware:
+            monedero_hardware.when_pressed = self.registrar_pulso_fisico
+            
+        # Iniciar el bucle de revisión de la ventana de tiempo
+        self.procesar_ventana_tiempo()
+
+    def _confirm_back(self):
+        """Se ejecuta al salir de la pantalla de pago hacia atrás."""
+        respuesta = messagebox.askyesno("Advertencia", "¿Estás seguro de regresar?")
+        if respuesta:
+            # Desvincular el hardware y detener el timer para no gastar recursos
+            if monedero_hardware:
+                monedero_hardware.when_pressed = None
+            if self.timer_id:
+                self.after_cancel(self.timer_id)
+            
+            self.app.prev_step()
 
     # Simulación de introducción de dinero
     def sync_counter(self, event):
