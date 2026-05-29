@@ -1,13 +1,12 @@
 from PIL.ImageOps import expand
-import time
 import customtkinter as ctk
 from PIL import Image
 import os
+import time
 from tkinter import messagebox
 import database
 from gpiozero import Button
 from gpiozero import BadPinFactory
-from time import time
 
 # --- HardwareGPIO ---
 PIN_MONEDERO = 17
@@ -205,12 +204,12 @@ class StepPago(ctk.CTkFrame):
     def registrar_pulso_fisico(self):
         """Esta función será llamada por gpiozero cada vez que el pin caiga a GND."""
         self.pulsos_temporales += 1
-        self.ultimo_tiempo = time()
+        self.ultimo_tiempo = time.time()
         print(f"Pulso en hardware detectado. Acumulados: {self.pulsos_temporales}")
 
     def procesar_ventana_tiempo(self):
         """Revisa constantemente si terminó de caer la moneda."""
-        if self.pulsos_temporales > 0 and (time() - self.ultimo_tiempo) > 0.4:
+        if self.pulsos_temporales > 0 and (time.time() - self.ultimo_tiempo) > 0.4:
             # La ventana de 400ms se cerró
             if self.pulsos_temporales in self.diccionario_monedas:
                 valor_ingresado = self.diccionario_monedas[self.pulsos_temporales]
