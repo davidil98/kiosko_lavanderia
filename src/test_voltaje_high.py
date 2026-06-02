@@ -10,19 +10,19 @@ GPIO.setmode(GPIO.BCM)
 GPIO.setup(PIN_OPTO, GPIO.OUT)
 
 try:
-    print("Enviando orden a la lavadora...")
-    
-    # Mandamos 3.3V "fuertes" al optoacoplador (Enciende el LED interno)
-    GPIO.output(PIN_OPTO, GPIO.HIGH) 
-    
-    # Mantenemos el "dedo" en el botón por medio segundo
-    time.sleep(0.5) 
-    
-    # Cortamos el voltaje (Apaga el LED interno)
-    GPIO.output(PIN_OPTO, GPIO.LOW) 
-    
-    print("¡Pulso completado!")
-    
-finally:
-    # Limpiamos los pines al terminar para evitar cortos
+    while True:
+        print("Enviando orden a la lavadora...")
+        
+        # Mandamos 3.3V "fuertes" al optoacoplador (Enciende el LED interno)
+        GPIO.output(PIN_OPTO, GPIO.HIGH) 
+        
+        # Mantenemos el "dedo" en el botón por medio segundo
+        time.sleep(0.1) 
+        
+        # Cortamos el voltaje (Apaga el LED interno)
+        GPIO.output(PIN_OPTO, GPIO.LOW) 
+        
+        print("¡Pulso completado!")
+
+except KeyboardInterrupt:
     GPIO.cleanup()
