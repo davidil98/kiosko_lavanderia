@@ -1,30 +1,54 @@
-from gpiozero import Button
-from signal import pause
+from gpiozero import OutputDevice, Button
+from pynput import keyboard
+import time
 
-# Configura el GPIO 17. 
-# Por defecto, Button activa el PULL_UP interno y detecta la caída a GND (0V).
-# bounce_time=0.05 actúa como filtro anti-rebote para ignorar fluctuaciones eléctricas falsas.
-pin_prueba = Button(17, bounce_time=0.05)
+# --- CONFIGURACIÓN DE PINES ---
+# GPIO 18: Será la "boca" que manda el voltaje al relé
+pin_salida = OutputDevice(18) 
 
-def señal_detectada():
-    print("⚡ ¡Pulso recibido! (El pin 17 tocó GND)")
+# GPIO 17: Será el "oído" que detecta si el relé realmente cerró el circuito
+# pull_up=True pone el pin en 3.3V esperando que el relé lo mande a GND
+pin_entrada = Button(17, pull_up=True, bounce_time=0.05) 
 
-def señal_liberada():
-    print("🛑 Señal liberada (El pin 17 volvió a 3.3V)")
+# Variable de control
+tecla_mantenida = False
 
-# Enlazamos los eventos del hardware a las funciones
-pin_prueba.when_pressed = señal_detectada
-pin_prueba.when_released = señal_liberada
+def al_presionar(tecla):
+    global tecla_mantenida
+    if tecla == keyboard.Key.space and not tecla_mantenida:
+        tecla_mantenida = True
+        print("🚀 [Pulso mandado] Activando relé...")
+        
+        # 1. Mandamos el pulso
+        pin_salida.on()
+        
+        # 2. Damos un margen de 100 milisegundos para que la mecánica del relé haga "clic"
+        time.sleep(0.1) 
+        
+        # 3. Verificamos si la señal regresó por el pin 17
+        if pin_entrada.is_pressed:
+            print("  ✅ [Señal detectada] El relé cerró el circuito exitosamente.")
+        else:
+            print("  ❌ [Señal no detectada] El pulso se envió, pero no regresó. Revisa los cables.")
+
+def al_soltar(tecla):
+    global tecla_mantenida
+    if tecla == keyboard.Key.space:
+        tecla_mantenida = False
+        pin_salida.off() # Apagamos el relé
+        print("🛑 Pulso liberado.\n")
+        
+    elif tecla == keyboard.Key.esc:
+        print("\nSaliendo del test...")
+        return False # Esto rompe el listener y termina el script
 
 print("=========================================")
-print(" SIMULADOR DE PULSOS ACTIVO (gpiozero)")
-print(" Haz un puente físico entre el GPIO 17 y GND para simular el pulso.")
-print(" Presiona Ctrl+C para salir.")
+print(" TEST DE BUCLE CERRADO (LOOPBACK)")
+print(" Presiona ESPACIO para mandar pulso y verificar.")
+print(" Presiona ESC para salir.")
 print("=========================================\n")
 
-try:
-    # pause() mantiene el script vivo escuchando el hardware 
-    # sin consumir recursos del procesador (cero bucles while)
-    pause() 
-except KeyboardInterrupt:
-    print("\nCerrando test de forma segura...")
+# El Listener del teclado mantiene el script vivo por sí solo, 
+# ya no necesitamos usar pause() ni bucles while.
+with keyboard.Listener(on_press=al_presionar, on_release=al_soltar) as listener:
+    listener.join()
