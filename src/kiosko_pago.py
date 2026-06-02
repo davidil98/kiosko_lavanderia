@@ -213,7 +213,7 @@ class StepPago(ctk.CTkFrame):
                 valor = self.diccionario_monedas[self.pulsos]
                 self.agregar_saldo(valor)
             else:
-                print(f"❌ Error de lectura (Pulsos: {self.pulsos})")
+                print(f"--- Error de lectura (Pulsos: {self.pulsos}) ---")
             self.pulsos = 0
             
         self.after_id = self.after(100, self.procesar_ventana_tiempo)
@@ -280,7 +280,7 @@ class StepPago(ctk.CTkFrame):
                 self.after_cancel(self.after_id)
             self.procesar_ventana_tiempo()
 
-        # 4. ¡LA CLAVE! Le decimos a la ventana principal (app) que escuche el teclado
+        # 4. Le decimos a la ventana principal (app) que escuche el teclado
         # y envíe los eventos a nuestra función sync_counter
         self.app.bind("<Key>", self.sync_counter)
 
