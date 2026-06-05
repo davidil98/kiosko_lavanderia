@@ -1,7 +1,7 @@
 import RPi.GPIO as GPIO
 import time
 
-PIN_OPTO = 17
+PIN_OPTO =17
 
 # 0.5 segundos simula perfectamente la pulsación de un dedo humano
 TIEMPO_PULSO = 0.5 

@@ -1,14 +1,17 @@
-from gpiozero import OutputDevice
+import RPi.GPIO as GPIO
 from pynput import keyboard
-import time
 
-# --- CONFIGURACIÓN DEL PIN ---
-# Al usar OutputDevice, gpiozero automáticamente hace el "GPIO.setup(OUT)"
-# y lo mantiene en 0V (apagado) hasta que le des la orden de encender.
-pin_optoacoplador = OutputDevice(17) 
-
-# Variable de control para evitar repeticiones si dejas la tecla pegada
+# --- CONFIGURACIÓN ---
+PIN_OPTO = 17 
 tecla_mantenida = False
+
+def inicializar_gpio():
+    # Usamos la numeración BCM estándar y configuramos como SALIDA
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(PIN_OPTO, GPIO.OUT)
+    
+    # Nos aseguramos de que el pin inicie apagado (0V) por seguridad
+    GPIO.output(PIN_OPTO, GPIO.LOW)
 
 def al_presionar(tecla):
     global tecla_mantenida
@@ -16,28 +19,36 @@ def al_presionar(tecla):
         tecla_mantenida = True
         print("🚀 [Pulso mandado] Inyectando 3.3V al optoacoplador...")
         
-        # Esto manda el amperaje necesario para encender el LED interno
-        pin_optoacoplador.on() 
+        # Encendemos el pin (3.3V)
+        GPIO.output(PIN_OPTO, GPIO.HIGH)
 
 def al_soltar(tecla):
     global tecla_mantenida
     if tecla == keyboard.Key.space:
         tecla_mantenida = False
         
-        # Corta el voltaje a 0V, apagando el LED interno
-        pin_optoacoplador.off() 
+        # Apagamos el pin (0V)
+        GPIO.output(PIN_OPTO, GPIO.LOW)
         print("🛑 Pulso liberado. La lavadora debió registrar el inicio.\n")
         
     elif tecla == keyboard.Key.esc:
         print("\nSaliendo del test de la lavadora...")
-        return False # Rompe el listener y termina el script
+        return False # Rompe el listener de pynput
 
-print("=========================================")
-print(" CONTROL REMOTO DE LAVADORA (OPTOACOPLADOR)")
-print(" Mantén presionado ESPACIO para hacer 'clic' en la máquina.")
-print(" Presiona ESC para salir.")
-print("=========================================\n")
-
-# El Listener del teclado mantiene el script vivo sin consumir CPU
-with keyboard.Listener(on_press=al_presionar, on_release=al_soltar) as listener:
-    listener.join()
+if __name__ == "__main__":
+    inicializar_gpio()
+    
+    print("=========================================")
+    print(" CONTROL REMOTO (RPi.GPIO + TECLADO)")
+    print(" Mantén presionado ESPACIO para hacer 'clic'.")
+    print(" Presiona ESC para salir.")
+    print("=========================================\n")
+    
+    try:
+        # El Listener captura el teclado en segundo plano
+        with keyboard.Listener(on_press=al_presionar, on_release=al_soltar) as listener:
+            listener.join()
+    finally:
+        # Al presionar ESC o interrumpir el script, se limpian los pines
+        GPIO.cleanup()
+        print("Pines GPIO limpiados y seguros.")

@@ -9,7 +9,7 @@ from gpiozero import Button
 from gpiozero import BadPinFactory
 
 # --- HardwareGPIO ---
-PIN_MONEDERO = 17
+PIN_MONEDERO = 21
 try:
     monedero_hardware = Button(PIN_MONEDERO)
 except BadPinFactory as e:

@@ -3,9 +3,9 @@ from time import time, sleep
 
 # Al usar "Button", gpiozero configura automáticamente el pin 17 
 # con PULL_UP interno y lo conecta a eventos de hardware.
-# bounce_time=0.05 ignora pulsos falsos menores a 50ms.
-PIN_MONEDERO = 17
-monedero = Button(PIN_MONEDERO)
+# bounce_time=0.02 ignora pulsos falsos menores a 50ms.
+PIN_MONEDERO = 21
+monedero = Button(PIN_MONEDERO, bounce_time=0.02)
 
 class LectorMonedas:
     def __init__(self):
@@ -24,7 +24,8 @@ class LectorMonedas:
     def procesar_ventana_tiempo(self):
         # Esta función revisa si ya pasó el tiempo de espera (ej. 0.4 segundos)
         # desde el último pulso registrado.
-        if self.pulsos > 0 and (time() - self.ultimo_tiempo) > 0.4:
+        # fast (0.3s), medium (0.5s, no recomendado por traslape).
+        if self.pulsos > 0 and (time() - self.ultimo_tiempo) > 0.3:
             if self.pulsos in self.diccionario_monedas:
                 valor = self.diccionario_monedas[self.pulsos]
                 print(f"✅ Moneda validada: ${valor} pesos")
