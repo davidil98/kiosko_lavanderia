@@ -39,8 +39,10 @@ class LectorMonedas:
         else:
             self.monedero = None
             
-        # Coroutine for time window checking
+        # El loop asíncrono no se puede crear aquí, debe ser invocado cuando la app inicie
         self._running = True
+
+    def start(self):
         asyncio.create_task(self.procesar_ventana_tiempo())
 
     def registrar_pulso(self):

@@ -25,7 +25,7 @@ def enviar_orden_cobro():
         "type": "point",
         # Generamos una referencia externa única para rastrear este cobro en EcoLuna
         "external_reference": f"ECOLUNA_{llave_idempotencia[:8]}", 
-        "expiration_time": "PT3M", # La orden expira en 3 minutos si no se paga
+        "expiration_time": "PT5M", # La orden expira en 3 minutos si no se paga
         "transactions": {
             "payments": [
                 {
