@@ -1,7 +1,7 @@
 from nicegui import ui, app
 import asyncio
 from models import KioskoState, SERVICIOS, PASOS
-import database
+import database_web
 import hardware
 
 # ──────────────────────────────────────────────
@@ -476,7 +476,7 @@ def kiosko_cliente():
 
 async def finalizar_pago():
     """Registra en BD y notifica al admin de forma reactiva, sin polling."""
-    nuevo_id = await database.registrar_venta_async(
+    nuevo_id = await database_web.registrar_venta_async(
         servicio=state.servicio_seleccionado.nombre,
         monto=state.servicio_seleccionado.precio,
         ingresado=state.dinero_ingresado,
@@ -620,7 +620,7 @@ async def admin_panel():
     @ui.refreshable
     async def vista_ordenes():
         with ui.element('div').props('id=admin-content').style('width:100%;'):
-            ventas = await database.obtener_ventas_activas_async()
+            ventas = await database_web.obtener_ventas_activas_async()
             pendientes = [v for v in ventas if v['estado'] == 'Pendiente']
             en_proceso = [v for v in ventas if v['estado'] == 'En proceso']
 
@@ -701,13 +701,13 @@ async def admin_panel():
 
     async def iniciar_maquina(venta, nombre_maquina, pin):
         await hardware.activar_lavadora(pin)
-        await database.marcar_en_proceso_async(venta['id_transaccion'], nombre_maquina)
+        await database_web.marcar_en_proceso_async(venta['id_transaccion'], nombre_maquina)
         ui.notify(f'▶ {nombre_maquina} iniciada — {venta.get("nombre_cliente","Orden")} #{venta["id_transaccion"]}',
                   type='positive', position='top', progress=True)
         await vista_ordenes.refresh()
 
     async def finalizar_orden(venta):
-        await database.marcar_completado_async(venta['id_transaccion'], venta['id_equipo'])
+        await database_web.marcar_completado_async(venta['id_transaccion'], venta['id_equipo'])
         ui.notify(f'✅ Orden #{venta["id_transaccion"]} completada', type='positive', position='top')
         await vista_ordenes.refresh()
 
@@ -719,7 +719,7 @@ async def admin_panel():
         }
         pin = pin_map.get(venta.get('id_equipo', ''), hardware.PIN_LAVADORA_1)
         await hardware.activar_lavadora(pin)
-        await database.marcar_completado_async(venta['id_transaccion'], venta['id_equipo'])
+        await database_web.marcar_completado_async(venta['id_transaccion'], venta['id_equipo'])
         ui.notify(f'⏸ Orden #{venta["id_transaccion"]} pausada y cancelada', type='warning', position='top')
         await vista_ordenes.refresh()
 

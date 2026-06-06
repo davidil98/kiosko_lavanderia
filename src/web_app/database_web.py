@@ -5,6 +5,35 @@ import asyncio
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "..", "data", "ecoluna_datos.db")
 
+# FUNCIÓN DE INICIALIZACIÓN
+def init_db():
+    """Crea el archivo de la base de datos y la estructura si no existen."""
+    # Crea la carpeta 'data' si por algún motivo no existe
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Creamos la tabla con las nuevas columnas incluidas
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS transacciones (
+            id_transaccion INTEGER PRIMARY KEY AUTOINCREMENT,
+            fecha_hora TEXT,
+            tipo_servicio TEXT,
+            monto_pagado INTEGER,
+            dinero_ingresado INTEGER,
+            cambio_devuelto INTEGER,
+            id_equipo TEXT,
+            duracion_estimada_min INTEGER,
+            estado TEXT DEFAULT 'Pendiente',
+            nombre_cliente TEXT DEFAULT 'Cliente',
+            inicio_servicio TEXT
+        )
+    ''')
+    conn.commit()
+    conn.close()
+    print("Base de datos verificada/inicializada correctamente.")
+
 def _get_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
