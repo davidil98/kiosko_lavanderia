@@ -382,26 +382,46 @@ def kiosko_cliente():
                             ui.notify("Has ingresado más dinero del necesario. Por favor, confirma el pago o cancela en la máquina para retirar el excedente y volver a intentar.", type='warning', position='top', timeout=10000, multi_line=True)
                             state.alerta_excedente_mostrada = True
 
-                        if state.puede_pagar() and not state.en_procesamiento:
-                            state.en_procesamiento = True
-                            asyncio.create_task(finalizar_pago())
+                        # ── COLA DE HARDWARE ELIMINADA DE AQUÍ PARA EVITAR BUGS DE RENDERIZADO ──
 
                         with ui.element('div').props('id=pago-panel'):
                             ui.html(f'<p style="font-size:0.88rem;color:#94a3b8;margin:0 0 2px;font-weight:600;">Cliente</p>')
                             ui.html(f'<p style="font-size:1.3rem;font-weight:800;color:#e2e8f0;margin:0 0 10px;">{state.nombre_cliente}</p>')
                             ui.html(f'<p style="font-size:0.82rem;color:#64748b;margin:0 0 2px;">Servicio: <strong style="color:#93c5fd;">{state.servicio_seleccionado.nombre}</strong></p>')
+                            
                             with ui.element('div').classes('monto-box'):
                                 ui.html('<div class="monto-label">Falta por insertar</div>')
                                 ui.html(f'<div class="monto-valor">${faltante}</div>')
                                 ui.html(f'<div class="monto-sub">Ingresado ${state.dinero_ingresado} de ${state.servicio_seleccionado.precio}</div>')
+                            
                             ui.html(f'<div class="progress-bar-bg"><div class="progress-bar-fill" style="width:{pct}%;"></div></div>')
                             ui.html(f'<div class="progress-pct">{pct}% completado — inserte monedas en el dispensador</div>')
                             
+                            # 🟢 NUEVO: BOTÓN DE CONFIRMAR PAGO
+                            # NiceGUI maneja funciones 'async def' directamente en el on_click sin problemas
+                            btn_confirmar = ui.button('✓ Confirmar y Registrar Pago')
+                            
+                            if state.puede_pagar():
+                                # Si ya se completó el dinero, el botón se activa, se pone verde y es cliqueable
+                                btn_confirmar.on('click', finalizar_pago)
+                                btn_confirmar.style(
+                                    'width:100%; margin-top:16px; padding:14px; background:#16a34a; '
+                                    'color:#fff; border-radius:11px; font-size:1.1rem; font-weight:700; cursor:pointer;'
+                                )
+                            else:
+                                # Si falta dinero, el botón se deshabilita por completo y se vuelve gris oscuro
+                                btn_confirmar.disable()
+                                btn_confirmar.style(
+                                    'width:100%; margin-top:16px; padding:14px; background:#1e293b; '
+                                    'color:#475569; border-radius:11px; font-size:1.1rem; font-weight:700; cursor:not-allowed;'
+                                )
+
+                            # ── BOTÓN DE CANCELACIÓN EXISTENTE ──
                             async def confirmar_cancelacion():
                                 if state.dinero_ingresado > 0:
                                     with ui.dialog() as dialog, ui.card():
                                         ui.label("Advertencia").style('font-size: 1.25rem; font-weight: bold; color: #ef4444; margin-bottom: 8px;')
-                                        ui.label("Tienes saldo ingresado. ¿Estás seguro de que deseas cancelar? Podrías perder el dinero ingresado y deberás intentar reclamar la devolución.").style('color: #64748b; white-space: normal;')
+                                        ui.label("Tienes saldo ingresado. ¿Estás seguro de que deseas cancelar? Podrías perder el dinero ingresado y deba reclamarse en mostrador.").style('color: #64748b; white-space: normal;')
                                         with ui.row().style('width: 100%; justify-content: flex-end; margin-top: 16px; gap: 8px;'):
                                             ui.button('No, continuar pago', on_click=dialog.close).style('background: #e2e8f0; color: #1e293b;')
                                             ui.button('Sí, regresar y cancelar', on_click=lambda: (dialog.close(), state.reset())).style('background: #ef4444; color: white;')
@@ -409,20 +429,11 @@ def kiosko_cliente():
                                 else:
                                     state.reset()
 
-                            ui.label('✕ Cancelar y regresar (podrías perder saldo)').style(
-                                'display:block;width:100%;margin-top:8px;padding:11px;background:#7f1d1d;'
+                            ui.element('button').style(
+                                'width:100%;margin-top:12px;padding:11px;background:#7f1d1d;'
                                 'color:#fca5a5;border:none;border-radius:11px;font-size:0.95rem;'
                                 'font-weight:600;cursor:pointer;text-align:center;white-space:normal;line-height:1.2;'
-                            ).on('click', confirmar_cancelacion)
-
-                        # Simulador de monedas (solo test)
-                        if not hardware.HARDWARE_AVAILABLE:
-                            with ui.element('div').props('id=sim-coins'):
-                                for v in [1, 2, 5, 10]:
-                                    ui.element('div').style(
-                                        'background:#1e293b;color:#94a3b8;border:1px solid #334155;'
-                                        'border-radius:8px;padding:6px 10px;font-size:0.8rem;cursor:pointer;'
-                                    ).on('click', lambda val=v: lector_monedas.simular_moneda(val)).text = f'${v}'
+                            ).on('click', confirmar_cancelacion).text = '✕ Cancelar y regresar (podrías perder saldo)'
 
                     # ══════════════════════════════
                     #  PASO 3 — ÉXITO
