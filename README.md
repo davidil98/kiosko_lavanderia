@@ -1,87 +1,59 @@
 # Kiosko de Lavandería EcoLuna 🌙🫧
 
-Este proyecto es una interfaz gráfica moderna (GUI) desarrollada para la administración de pagos y servicios de la Lavandería EcoLuna. Está diseñada específicamente para ejecutarse en una Raspberry Pi con pantalla táctil de 7 pulgadas (resolución 800x480), controlando el flujo mediante optoacopladores.
+Este proyecto es el sistema central de administración, cobro y control de hardware para la Lavandería EcoLuna. Ha evolucionado de una interfaz local a una **Arquitectura Web (Headless)**, diseñada para separar el flujo de cobro del cliente y el panel de control del administrador, operando desde una Raspberry Pi.
 
-Actualmente soporta integración con **monederos/tragamonedas** físicos para pagos en efectivo mediante el mapeo de señales, y deja preparada la arquitectura para integrar APIs de pagos electrónicos en un futuro.
+El sistema controla directamente el hardware de la lavandería (lavadoras LG Inverter, cajón de dinero) mediante circuitos aislados con optoacopladores y relés, garantizando seguridad industrial.
 
 ---
 
 ## 📸 Características Principales
 
-* **Interfaz Moderna (Dark/Light Mode):** Construida con `customtkinter` para una estética pulida y botones grandes ideales para pantallas táctiles.
-* **Flujo de Asistente (Wizard):** Motor de navegación de pasos ("State Manager") completamente dinámico:
-  1. Selección de Servicio (Lavado, Secado, Ambos).
-  2. Confirmación y Total a Pagar.
-  3. Ingreso de Efectivo (Simulado con eventos de teclado para el tragamonedas).
-  4. Pantalla de Inicio de Máquina y fin de sesión.
-* **Manejo de Estado Centralizado:** Guarda dinámicamente lo ingresado por un cliente y se "formatea" limpiamente usando `reset_session()` para el próximo usuario.
-* **Registro de Ventas en Tiempo Real:** Base de datos `SQLite3` integrada (`ecoluna_datos.db`) para llevar un registro automático de las transacciones (servicio, monto pagado, cambio y fecha).
+* **Arquitectura Web-Based:** Construida con [FastAPI / NiceGUI] para permitir múltiples pantallas simultáneas a través de la red local.
+* **Sistema de Cola Asíncrono (Cuello de botella eliminado):** * La **Pantalla Cliente (Touch)** procesa el cobro y se libera inmediatamente para el siguiente usuario.
+  * La **Pantalla Admin (Mostrador)** recibe las órdenes pendientes, permitiendo al operador pesar la ropa, asignar la máquina y disparar el inicio del ciclo de forma segura.
+* **Control de Hardware Aislado:** Mapeo de señales para lectura de monederos mecánicos y disparo de pulsos de inicio en máquinas industriales de 24V.
+* **Registro de Ventas en Tiempo Real:** Base de datos `SQLite3` integrada (`ecoluna_datos.db`) para llevar el control financiero e historial de equipos.
 
 ---
 
-## 🛠️ Requisitos del Sistema
+## 🛠️ Requisitos del Sistema y Hardware
 
-- **Hardware:** Computadora estándar o Raspberry Pi (idealmente con pantalla táctil).
-- **Software:** Python 3.9 o superior.
-
-### Dependencias
-
-El proyecto utiliza las siguientes bibliotecas de Python:
-
-```bash
-pip install customtkinter
-pip install Pillow
-```
-
-*Nota: `sqlite3` viene integrado por defecto en las librerías estándar de Python.*
+- **Cerebro Central:** Raspberry Pi (Zero 2 W / 3B+ / 4) ejecutándose como servidor.
+- **Pantallas:** - 1x Pantalla Táctil (Cliente) ejecutando un navegador web en Modo Kiosco.
+  - 1x Monitor VGA o Dispositivo móvil (Admin/Mostrador) conectado a la red local.
+- **Electrónica:**
+  - Optoacopladores (ej. 4N25) para aislar el botón de Inicio/Pausa de las lavadoras LG.
+  - Módulo Relé para el disparo del solenoide (12V-18V) de la caja de billetes/cambio.
+  - Tragamonedas multimoneda configurado con blindaje por software (Debounce).
+- **Software:** Python 3.9+, framework web (FastAPI/NiceGUI).
 
 ---
 
-## 🚀 Instalación y Ejecución
+## 🚀 Flujo de Operación (Workflow)
 
-1. Clona el repositorio en tu máquina o Raspberry Pi:
-   ```bash
-   git clone <tu-url-del-repositorio>
-   cd lavanderia/kiosko_pago
-   ```
-2. Instala las dependencias necesarias:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Ejecuta la aplicación principal:
-   ```bash
-   python3 GUI.py
-   ```
-
-*(Nota para producción: En `GUI.py`, línea ~301, puedes descomentar `self.attributes('-fullscreen', True)` para bloquear la pantalla en modo Kiosko en tu Raspberry).*
+1. **Selección y Cobro (Cliente):** El usuario elige Lavado/Secado en la pantalla táctil y realiza el pago (Efectivo/Terminal).
+2. **Generación de Ticket Virtual:** La Raspberry Pi valida el pago, la base de datos registra una nueva orden en estado "Pendiente" y la pantalla vuelve al inicio.
+3. **Recepción y Asignación (Admin):** El encargado recibe la ropa, la pesa, verifica la capacidad y configura el ciclo físico (rueda de la lavadora).
+4. **Disparo de Hardware:** Desde el panel web de administración, el encargado selecciona la máquina a utilizar y presiona "Iniciar". La Raspberry envía un pulso aislado de 0.5s al optoacoplador, iniciando el lavado.
 
 ---
 
 ## 🗄️ Estructura de la Base de Datos
 
-La aplicación crea automáticamente el archivo `ecoluna_datos.db` en la primera ejecución. Cada vez que una persona completa un pago, se guarda un registro en la tabla `transacciones` con la siguiente estructura:
+La aplicación crea automáticamente el archivo `ecoluna_datos.db`. La tabla principal `transacciones` gestiona la cola de trabajo:
 
 * `id_transaccion`: ID único.
 * `fecha_hora`: Fecha y hora exactas de la venta.
-* `tipo_servicio`: "Lavar", "Secar", "Lavar y secar".
+* `tipo_servicio`: "Lavar", "Secar", "Ambos".
 * `monto_pagado`: Costo total cobrado.
-* `dinero_ingresado`: Dinero depositado en la máquina.
-* `cambio_devuelto`: Dinero sobrante.
-* `id_equipo`: Identificador de la máquina (ej. "N/A" por ahora).
-* `duracion_estimada_min`: Tiempo aproximado asignado.
-
----
-
-## ⌨️ Uso del Teclado / Tragamonedas
-
-La pantalla 3 (Pago) está esperando el "pulso" digital del tragamonedas que se mapea a teclas del sistema.
-Para probarlo en tu computadora:
-- En la pantalla de pago, presiona los números `1`, `2` o `5` en tu teclado; verás cómo el contador de dinero depositado sube automáticamente hasta cubrir el total.
-- Si ingresas dinero de más o cancelas la operación, el kiosko te enviará un aviso para proteger tu saldo.
+* `id_equipo`: Identificador de la máquina asignada (Lavadora 1, Secadora 2).
+* `estado`: **Pendiente** (Pagado, esperando ropa) | **En Curso** (Lavando) | **Finalizado**.
 
 ---
 
 ## 📝 Próximos Pasos (Roadmap)
-- [] Integración con los pines GPIO de Raspberry Pi (salidas optoacopladas).
-- [] Lector de código QR para pagos electrónicos.
-- [] Opción de Selección de Máquina / Torreta específica.
+
+- [ ] **Migración a Web:** Extraer la lógica de `customtkinter` y montar el servidor backend/frontend.
+- [ ] **Integración de Caja de Dinero:** Añadir pulso a través de un módulo relé para abrir el cajón (solenoide 18V) al dar cambio.
+- [ ] **Auditoría Energética (PZEM-004T):** Implementar monitoreo de consumo eléctrico en tiempo real para evitar que clientes (o personal) seleccionen ciclos de secado en lavadoras asignadas solo para lavado.
+- [ ] **Acceso Remoto:** Configuración de túnel (ej. Tailscale) para revisión de cortes de caja a distancia.
