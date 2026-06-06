@@ -89,6 +89,15 @@ def init_gpio_lavadoras():
             except Exception as e:
                 print(f"Error setup pin {pin}: {e}")
 
+def limpiar_pines():
+    """Libera los pines de la Raspberry Pi al apagar el servidor."""
+    if HARDWARE_AVAILABLE:
+        try:
+            GPIO.cleanup()
+            print("🧹 Hardware: Pines GPIO liberados correctamente.")
+        except Exception as e:
+            print(f"Error al limpiar pines: {e}")
+
 async def activar_lavadora(pin: int):
     """Manda un pulso de 0.5s de manera asíncrona (HIGH) y vuelve a LOW"""
     print(f"Hardware: Iniciando pulso en PIN {pin} por 0.5s...")

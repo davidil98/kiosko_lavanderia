@@ -38,6 +38,24 @@ El sistema controla directamente el hardware de la lavandería (lavadoras LG Inv
 
 ---
 
+## 🧪 Modo de Pruebas (Test Mode)
+
+Para ejecutar el Kiosko en cualquier computadora (Windows/Mac) o cuando no tengas la Raspberry Pi o sus componentes a la mano, puedes iniciar el sistema en **Modo de Pruebas**. Este modo silencia las alertas de falta de hardware y te permite interactuar usando tu teclado físico.
+
+```bash
+cd src/web_app
+python main.py test
+```
+
+**Simulación de ingreso de monedas con teclado:**
+Al arrancar en este modo, en cualquier punto de las pantallas del kiosko (`/`), puedes presionar las siguientes teclas para simular un pulso desde el monedero:
+- `1` = Agrega $1
+- `2` = Agrega $2
+- `5` = Agrega $5
+- `0` = Agrega $10
+
+---
+
 ## 🗄️ Estructura de la Base de Datos
 
 La aplicación crea automáticamente el archivo `ecoluna_datos.db`. La tabla principal `transacciones` gestiona la cola de trabajo:

@@ -719,7 +719,12 @@ async def admin_panel():
     # Limpiar el callback cuando la conexión se cierre
     app.on_disconnect(lambda: remover_callback_admin(vista_ordenes.refresh))
 
+app.on_shutdown(hardware.limpiar_pines)
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(title='Lavandería EcoLuna', port=8080, dark=False, favicon='🫧',
-           storage_secret='ecoluna-secret-2024')
+    ui.run(
+        title='EcoLuna Kiosko', 
+        port=8000, 
+        favicon='🌙',
+        reload=False
+    )
