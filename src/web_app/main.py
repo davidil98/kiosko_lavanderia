@@ -39,6 +39,8 @@ lector_monedas = hardware.LectorMonedas(callback=on_moneda_ingresada)
 app.on_startup(lector_monedas.start)
 hardware.init_gpio_lavadoras()
 
+database_web.init_db()
+
 # ──────────────────────────────────────────────
 #  CSS COMPARTIDO
 # ──────────────────────────────────────────────
@@ -185,10 +187,10 @@ def kiosko_cliente():
             .progress-pct { font-size: 0.72rem; color: #475569; margin-bottom: 12px; }
             .btn-cancelar {
                 width: 100%; margin-top: 10px; padding: 11px;
-                background: #7f1d1d; color: #fca5a5; border: none; border-radius: 11px;
+                background: #D10000; color: #FF5C5C; border: none; border-radius: 11px;
                 font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: background 0.2s;
             }
-            .btn-cancelar:hover { background: #991b1b; }
+            .btn-cancelar:hover { background: #FF5C5C; }
 
             /* ─── Pantalla de éxito ─── */
             #exito-panel { text-align: center; width: 100%; max-width: 420px; }
@@ -299,14 +301,14 @@ def kiosko_cliente():
                         ui.html('<p class="instruccion">Selecciona el servicio que deseas utilizar</p>')
                         with ui.element('div').style('display:flex; gap:28px; justify-content:center;'):
                             for servicio in SERVICIOS:
-                                icono = '🫧' if servicio.nombre == 'Lavar' else '🌬️'
+                                icono = '../media/washing-clothes_dark.png' if servicio.nombre == 'Lavar' else '../media/drying_dark.png'
                                 with ui.element('div').style(
                                     'cursor:pointer; border-radius:16px; background:#16213e;'
                                     'border:2px solid #0f3460; padding:24px 20px; width:195px;'
                                     'display:flex; flex-direction:column; align-items:center;'
                                     'gap:6px; transition:all 0.22s; user-select:none;'
                                 ).on('click', lambda s=servicio.nombre: state.seleccionar_servicio(s)):
-                                    ui.html(f'<span style="font-size:2.6rem;">{icono}</span>')
+                                    ui.html(f'<span style="font-size:3rem;"><img src="{icono}" alt="{servicio.nombre}" style="width:100px; height:100px;"></span>')
                                     ui.html(f'<span style="font-size:1.25rem;font-weight:700;color:#e2e8f0;">{servicio.nombre}</span>')
                                     ui.html(f'<span style="font-size:1.9rem;font-weight:800;color:#3b82f6;">${servicio.precio}</span>')
 
@@ -405,8 +407,7 @@ def kiosko_cliente():
                                 # Si ya se completó el dinero, el botón se activa, se pone verde y es cliqueable
                                 btn_confirmar.on('click', finalizar_pago)
                                 btn_confirmar.style(
-                                    'width:100%; margin-top:16px; padding:14px; background:#16a34a; '
-                                    'color:#fff; border-radius:11px; font-size:1.1rem; font-weight:700; cursor:pointer;'
+                                    'width:100%; margin-top:16px; padding:14px; font-size:1.1rem; font-weight:700; cursor:pointer;'
                                 )
                             else:
                                 # Si falta dinero, el botón se deshabilita por completo y se vuelve gris oscuro
@@ -423,17 +424,14 @@ def kiosko_cliente():
                                         ui.label("Advertencia").style('font-size: 1.25rem; font-weight: bold; color: #ef4444; margin-bottom: 8px;')
                                         ui.label("Tienes saldo ingresado. ¿Estás seguro de que deseas cancelar? Podrías perder el dinero ingresado y deba reclamarse en mostrador.").style('color: #64748b; white-space: normal;')
                                         with ui.row().style('width: 100%; justify-content: flex-end; margin-top: 16px; gap: 8px;'):
-                                            ui.button('No, continuar pago', on_click=dialog.close).style('background: #e2e8f0; color: #1e293b;')
-                                            ui.button('Sí, regresar y cancelar', on_click=lambda: (dialog.close(), state.reset())).style('background: #ef4444; color: white;')
+                                            ui.button('No, continuar pago', on_click=dialog.close)
+                                            ui.button('Sí, regresar y cancelar', on_click=lambda: (dialog.close(), state.reset()), color="red")
                                     dialog.open()
                                 else:
                                     state.reset()
 
-                            ui.element('button').style(
-                                'width:100%;margin-top:12px;padding:11px;background:#7f1d1d;'
-                                'color:#fca5a5;border:none;border-radius:11px;font-size:0.95rem;'
-                                'font-weight:600;cursor:pointer;text-align:center;white-space:normal;line-height:1.2;'
-                            ).on('click', confirmar_cancelacion).text = '✕ Cancelar y regresar (podrías perder saldo)'
+                            btn_cancelar = ui.button('✕ Cancelar y regresar (podrías perder saldo)', color='red').classes('btn-cancelar')
+                            btn_cancelar.on('click', confirmar_cancelacion)
 
                     # ══════════════════════════════
                     #  PASO 3 — ÉXITO
@@ -733,9 +731,12 @@ async def admin_panel():
 app.on_shutdown(hardware.limpiar_pines)
 
 if __name__ in {"__main__", "__mp_main__"}:
-    ui.run(
-        title='EcoLuna Kiosko', 
-        port=8000, 
-        favicon='🌙',
-        reload=False
-    )
+    try:
+        ui.run(
+            title='EcoLuna Kiosko', 
+            port=8000, 
+            favicon='../media/logo_slogan.png',
+            reload=False
+        )
+    except KeyboardInterrupt:
+        print('Stop app by KeyboardInterrupt.')
