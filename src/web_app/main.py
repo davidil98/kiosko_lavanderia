@@ -726,7 +726,12 @@ async def admin_panel():
     registrar_callback_admin(vista_ordenes.refresh)
 
     # Limpiar el callback cuando la conexión se cierre
-    app.on_disconnect(lambda: remover_callback_admin(vista_ordenes.refresh))
+    try:
+        from nicegui import context
+        context.get_client().on_disconnect(lambda: remover_callback_admin(vista_ordenes.refresh))
+    except Exception:
+        # Fallback de limpieza silenciosa
+        pass
 
 app.on_shutdown(hardware.limpiar_pines)
 

@@ -11,7 +11,9 @@ def init_db():
     # Crea la carpeta 'data' si por algún motivo no existe
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    conn.execute('PRAGMA journal_mode=WAL;')
+    conn.execute('PRAGMA synchronous=NORMAL;')
     cursor = conn.cursor()
     
     # Creamos la tabla con las nuevas columnas incluidas
@@ -35,7 +37,9 @@ def init_db():
     print("Base de datos verificada/inicializada correctamente.")
 
 def _get_connection():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10.0)
+    conn.execute('PRAGMA journal_mode=WAL;')
+    conn.execute('PRAGMA synchronous=NORMAL;')
     conn.row_factory = sqlite3.Row
     return conn
 
