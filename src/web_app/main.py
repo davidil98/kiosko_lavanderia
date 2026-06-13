@@ -4,6 +4,9 @@ from models import KioskoState, SERVICIOS, PASOS
 import database_web
 import hardware
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MEDIA_DIR = os.path.join(BASE_DIR, 'media')
@@ -369,7 +372,7 @@ def kiosko_cliente():
                                   .classes('w-3/4 h-14 text-xl font-bold bg-slate-700 text-white rounded-lg shadow-md px-0')
 
                         # --- 4. BOTÓN CONTINUAR ---
-                        def ir_a_pago():
+                        def ir_a_pesar():
                             if state.nombre_cliente.strip() == "":
                                 ui.notify('Por favor, ingresa al menos una letra.', type='warning', position='top')
                                 return
@@ -377,12 +380,26 @@ def kiosko_cliente():
                             # Aquí debes llamar a la función que refresca tu UI principal (ej. refrescar_kiosko())
                             kiosko_ui.refresh() # ¡Reemplaza esto con tu función de refresco de pantalla!
 
-                        ui.button('Continuar al Pago', on_click=ir_a_pago).classes('btn-confirmar-nombre max-w-lg mx-auto mt-4')
+                        ui.button('Continuar', on_click=ir_a_pesar).classes('btn-confirmar-nombre max-w-lg mx-auto mt-4')
 
                     # ══════════════════════════════
-                    #  PASO 2 — PAGO
+                    #  PASO 2 — PESAR ROPA
                     # ══════════════════════════════
                     elif state.paso_actual == 2:
+                        with ui.element('div').props('id=nombre-panel').classes('mx-auto'):
+                            ui.label('Pesa tu ropa').style('font-size:2.2rem;font-weight:800;color:#e2e8f0;margin-bottom:12px;')
+                            ui.label('Por favor, pesa tu ropa en la báscula frente a ti e informa al administrador. Asegúrate de no exceder el límite permitido.').style('font-size:1.1rem;color:#94a3b8;margin-bottom:20px;line-height:1.5;')
+                            
+                            def ir_a_pago():
+                                state.paso_actual = 3
+                                kiosko_ui.refresh()
+
+                            ui.button('Ya pesé mi ropa, Continuar al pago', on_click=ir_a_pago).classes('btn-confirmar-nombre max-w-lg mx-auto mt-4')
+
+                    # ══════════════════════════════
+                    #  PASO 3 — PAGO
+                    # ══════════════════════════════
+                    elif state.paso_actual == 3:
                         pct = min(100, int(state.dinero_ingresado / state.servicio_seleccionado.precio * 100))
                         faltante = state.get_faltante()
 
@@ -440,9 +457,9 @@ def kiosko_cliente():
                             btn_cancelar.on('click', confirmar_cancelacion)
 
                     # ══════════════════════════════
-                    #  PASO 3 — ÉXITO
+                    #  PASO 4 — ÉXITO
                     # ══════════════════════════════
-                    elif state.paso_actual == 3:
+                    elif state.paso_actual == 4:
                         cambio = state.get_cambio()
                         cambio_html = f'<div class="cambio-box">💰 Su cambio: ${cambio}</div>' if cambio > 0 else ''
                         ui.html(f'''
@@ -599,24 +616,44 @@ async def admin_panel():
         </style>
     ''')
 
+    # ─── Bypass Dialog ───
+    async def ejecutar_bypass():
+        pwd = input_pwd.value
+        if pwd == os.getenv('BYPASS_PASSWORD', 'admin123'):
+            nuevo_id = await database_web.registrar_venta_async(
+                servicio='Cortesía / Bypass',
+                monto=0,
+                ingresado=0,
+                cambio=0,
+                equipo='N/A',
+                duracion=45,
+                nombre_cliente='Cortesía'
+            )
+            dialogo_bypass.close()
+            input_pwd.value = ''
+            ui.notify('Servicio de cortesía creado y añadido a pendientes.', type='positive')
+            notificar_admin()
+        else:
+            ui.notify('Contraseña incorrecta', type='negative')
+
+    with ui.dialog() as dialogo_bypass, ui.card().style('min-width: 300px'):
+        ui.label('Autorizar Servicio de Cortesía').classes('text-lg font-bold text-slate-800 mb-2')
+        input_pwd = ui.input('Contraseña').props('type=password').classes('w-full mb-4')
+        with ui.row().classes('w-full justify-end'):
+            ui.button('Cancelar', on_click=dialogo_bypass.close).props('flat')
+            ui.button('Autorizar', on_click=ejecutar_bypass).props('color=green')
+
     # ─── Header ───
-    ui.html('''
-        <div id="admin-header">
-            <div id="admin-header-inner">
-                <div class="logo-area">
-                    <img src="/media/logo_slogan.png" alt="EcoLuna">
-                    <div>
-                        <div class="admin-title">Panel de Administración</div>
-                        <div class="admin-subtitle">Lavandería EcoLuna</div>
-                    </div>
-                </div>
-                <div id="status-indicator">
-                    <span class="dot-live"></span>
-                    Actualización en tiempo real
-                </div>
-            </div>
-        </div>
-    ''')
+    with ui.element('div').props('id=admin-header'):
+        with ui.element('div').props('id=admin-header-inner'):
+            with ui.element('div').classes('logo-area'):
+                ui.image('/media/logo_slogan.png')
+                with ui.element('div'):
+                    ui.html('<div class="admin-title">Panel de Administración</div>')
+                    ui.html('<div class="admin-subtitle">Lavandería EcoLuna</div>')
+            with ui.element('div').style('display:flex; align-items:center; gap:16px;'):
+                ui.button('Servicio de Cortesía / Bypass', on_click=dialogo_bypass.open).props('outline color=primary size=sm').classes('font-bold')
+                ui.html('<div id="status-indicator"><span class="dot-live"></span>Actualización en tiempo real</div>')
 
     @ui.refreshable
     async def vista_ordenes():
@@ -636,7 +673,7 @@ async def admin_panel():
                 ui.html('<div class="empty-state"><div class="icon">✅</div><p>No hay órdenes pendientes</p></div>')
             else:
                 for v in pendientes:
-                    _render_pendiente(v)
+                    _render_pendiente(v, en_proceso)
 
             # ─── EN PROCESO ───
             ui.html(f'''
@@ -655,7 +692,7 @@ async def admin_panel():
         cls = 'badge-lavar' if 'Lavar' in tipo else 'badge-secar'
         return f'<span class="orden-servicio-badge {cls}">{tipo}</span>'
 
-    def _render_pendiente(v):
+    def _render_pendiente(v, en_proceso):
         nombre = v.get('nombre_cliente') or 'Sin nombre'
         with ui.element('div').classes('orden-card'):
             with ui.element('div').style('flex:1; min-width:0;'):
@@ -671,9 +708,13 @@ async def admin_panel():
                         ('🫧 Lavadora 3', hardware.PIN_LAVADORA_3, 'Lavadora 3'),
                     ]
                     for label, pin, nombre_m in MAQUINAS:
-                        ui.label(label).classes('btn-maquina btn-iniciar').on(
-                            'click', lambda e, venta=v, n=nombre_m, p=pin: iniciar_maquina(venta, n, p)
-                        )
+                        en_uso = any(p['id_equipo'] == nombre_m for p in en_proceso)
+                        if en_uso:
+                            ui.label(f"{label} (En uso)").classes('btn-maquina').style('background:#94a3b8; color:white; cursor:not-allowed;')
+                        else:
+                            ui.label(label).classes('btn-maquina btn-iniciar').on(
+                                'click', lambda e, venta=v, n=nombre_m, p=pin: iniciar_maquina(venta, n, p)
+                            )
 
     def _render_en_proceso(v):
         nombre = v.get('nombre_cliente') or 'Sin nombre'
@@ -747,4 +788,4 @@ if __name__ in {"__main__", "__mp_main__"}:
             reload=False
         )
     except KeyboardInterrupt:
-        print('Stop app by KeyboardInterrupt.')
+        print('\nStop app by KeyboardInterrupt.\n')

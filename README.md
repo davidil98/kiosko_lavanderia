@@ -89,3 +89,4 @@ La aplicación crea automáticamente el archivo `ecoluna_datos.db`. La tabla pri
 - [ ] **Integración de Caja de Dinero:** Añadir pulso a través de un módulo relé para abrir el cajón (solenoide 18V) al dar cambio.
 - [ ] **Auditoría Energética (PZEM-004T):** Implementar monitoreo de consumo eléctrico en tiempo real para evitar que clientes (o personal) seleccionen ciclos de secado en lavadoras asignadas solo para lavado.
 - [ ] **Acceso Remoto:** Configuración de túnel (ej. Tailscale) para revisión de cortes de caja a distancia.
+- [ ] **Bypass:** Acoplar Google Authenticator para el paso de autorización de Servicios de Cortesía en el panel de administrador.

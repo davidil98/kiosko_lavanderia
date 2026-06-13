@@ -17,8 +17,9 @@ SERVICIOS = [
 PASOS = [
     "1. Selección de Servicio",
     "2. Ingresar Nombre",
-    "3. Insertar Monedas",
-    "4. Pago Exitoso",
+    "3. Pesar Ropa",
+    "4. Insertar Monedas",
+    "5. Pago Exitoso",
 ]
 
 class KioskoState:
@@ -80,7 +81,7 @@ class KioskoState:
     def procesar_exito(self, id_transaccion: int):
         self.exito = True
         self.ultimo_id_transaccion = id_transaccion
-        self.paso_actual = 3
+        self.paso_actual = 4
         self._trigger_change()
 
     def reset(self):
