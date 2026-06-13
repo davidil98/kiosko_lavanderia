@@ -785,7 +785,8 @@ if __name__ in {"__main__", "__mp_main__"}:
             title='EcoLuna Kiosko', 
             port=8000, 
             favicon='../media/logo_slogan.png',
-            reload=False
+            reload=False,
+            show=False
         )
     except KeyboardInterrupt:
         print('\nStop app by KeyboardInterrupt.\n')
