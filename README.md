@@ -56,6 +56,20 @@ Al arrancar en este modo, en cualquier punto de las pantallas del kiosko (`/`), 
 
 ---
 
+## 🖥️ Ejecución en Modo Kiosko (Raspberry Pi)
+
+Para un entorno de producción donde la aplicación debe arrancar en pantalla completa y de forma ininterrumpida (Modo Kiosko), se cuenta con un script para generar un acceso directo (`.desktop`).
+
+Ejecuta el siguiente script en la raíz del proyecto para generar el lanzador:
+```bash
+./create_desktop_shortcut.sh
+```
+Esto creará el archivo **`KioskoEcoLuna.desktop`** en el escritorio del usuario, el cual:
+1. Inicia el servidor de NiceGUI en segundo plano (puerto 8000).
+2. Abre automáticamente el navegador Chromium en modo incógnito, sin barras y en pantalla completa apuntando a `http://localhost:8000`.
+
+---
+
 ## 🗄️ Estructura de la Base de Datos
 
 La aplicación crea automáticamente el archivo `ecoluna_datos.db`. La tabla principal `transacciones` gestiona la cola de trabajo:

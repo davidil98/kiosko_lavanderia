@@ -3,6 +3,10 @@ import asyncio
 from models import KioskoState, SERVICIOS, PASOS
 import database_web
 import hardware
+import os
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+MEDIA_DIR = os.path.join(BASE_DIR, 'media')
 
 # ──────────────────────────────────────────────
 #  ESTADO GLOBAL
@@ -40,6 +44,8 @@ app.on_startup(lector_monedas.start)
 hardware.init_gpio_lavadoras()
 
 database_web.init_db()
+
+app.add_static_files('/media', MEDIA_DIR)
 
 # ──────────────────────────────────────────────
 #  CSS COMPARTIDO
@@ -468,7 +474,6 @@ def kiosko_cliente():
                         ''')
 
     state.set_callback(kiosko_ui.refresh)
-    app.add_static_files('/media', '../media')
     kiosko_ui()
 
 
@@ -593,8 +598,6 @@ async def admin_panel():
             .empty-state p { font-size: 0.95rem; font-weight: 500; }
         </style>
     ''')
-
-    app.add_static_files('/media', '../media')
 
     # ─── Header ───
     ui.html('''
