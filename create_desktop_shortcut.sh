@@ -24,7 +24,7 @@ PYTHON_PID=\$!
 sleep 4
 
 # Arrancar Chromium (El script se quedará "pausado" aquí mientras Chromium esté abierto)
-chromium-browser --kiosk --window-position=0,0 --noerrdialogs --disable-infobars --no-first-run --incognito http://localhost:8000 --new-window --window-position=1024,0 http://localhost:8000/admin
+chromium --kiosk --window-position=0,0 --noerrdialogs --disable-infobars --no-first-run --incognito http://localhost:8000 --new-window --window-position=1024,0 http://localhost:8000/admin
 
 # Limpieza: Si alguien cierra Chromium (ej. Alt+F4), el script avanza y mata a Python
 # Esto evita que queden procesos "fantasma" consumiendo RAM en la Raspberry

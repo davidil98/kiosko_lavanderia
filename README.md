@@ -85,8 +85,9 @@ La aplicación crea automáticamente el archivo `ecoluna_datos.db`. La tabla pri
 
 ## 📝 Próximos Pasos (Roadmap)
 
-- [ ] **Migración a Web:** Extraer la lógica de `customtkinter` y montar el servidor backend/frontend.
-- [ ] **Integración de Caja de Dinero:** Añadir pulso a través de un módulo relé para abrir el cajón (solenoide 18V) al dar cambio.
-- [ ] **Auditoría Energética (PZEM-004T):** Implementar monitoreo de consumo eléctrico en tiempo real para evitar que clientes (o personal) seleccionen ciclos de secado en lavadoras asignadas solo para lavado.
-- [ ] **Acceso Remoto:** Configuración de túnel (ej. Tailscale) para revisión de cortes de caja a distancia.
-- [ ] **Bypass:** Acoplar Google Authenticator para el paso de autorización de Servicios de Cortesía en el panel de administrador.
+[x] **Migración a Web:** Extraer la lógica de `customtkinter` y montar el servidor backend/frontend.
+[ ] **Implementación de íconos:** Reemplazar los emojis por íconos svg.
+[ ] **Integración de Caja de Dinero:** Añadir pulso a través de un módulo relé para abrir el cajón (solenoide 18V) al dar cambio.
+[ ] **Auditoría Energética (PZEM-004T):** Implementar monitoreo de consumo eléctrico en tiempo real para evitar que clientes (o personal) seleccionen ciclos de secado en lavadoras asignadas solo para lavado.
+[ ] **Acceso Remoto:** Configuración de túnel (ej. Tailscale) para revisión de cortes de caja a distancia.
+[ ] **Bypass:** Acoplar Google Authenticator para el paso de autorización de Servicios de Cortesía en el panel de administrador.
