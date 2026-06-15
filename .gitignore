@@ -4,3 +4,4 @@ __pycache__
 ecoluna_datos.db
 .DS_Store
 *.code-workspace
+agent_notation

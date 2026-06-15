@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#64748b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M5 8h4"/>
+  <path d="M5 12h6"/>
+  <path d="M5 16h4"/>
+  <text x="15" y="9" font-size="8" font-weight="bold" fill="#64748b" stroke="none">z</text>
+  <text x="17" y="13" font-size="6" font-weight="bold" fill="#64748b" stroke="none">z</text>
+  <text x="19" y="17" font-size="4" font-weight="bold" fill="#64748b" stroke="none">z</text>
+</svg>

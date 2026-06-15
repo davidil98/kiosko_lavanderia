@@ -74,20 +74,24 @@ class LectorMonedas:
         if hasattr(self, 'monedero') and self.monedero:
             self.monedero.close()
 
-# --- Lavadoras ---
-PIN_LAVADORA_1 = 17
-PIN_LAVADORA_2 = 18
-PIN_LAVADORA_3 = 4
+# --- Lavadoras y Secadoras ---
+# Modificar aquí para añadir, quitar o cambiar máquinas.
+# tipo: 'mixto' = lava y seca | 'lavado' = solo lava | 'secado' = solo seca
+EQUIPOS = {
+    "lavasecadora_1": {"nombre": "Lavasecadora 1",  "tipo": "mixto",  "capacidad_kg": 5,  "gpio": 17},
+    "lavasecadora_2": {"nombre": "Lavasecadora 2",  "tipo": "mixto",  "capacidad_kg": 5,  "gpio": 18},
+    "lavasecadora_3": {"nombre": "Lavasecadora 3",  "tipo": "mixto",  "capacidad_kg": 5,  "gpio": 4},
+    "secadora_1":     {"nombre": "Secadora 1",  "tipo": "secado", "capacidad_kg": 5, "gpio": 23},
+}
 
 def init_gpio_lavadoras():
     if HARDWARE_AVAILABLE:
         GPIO.setmode(GPIO.BCM)
-        # Inicializar todos en LOW (0V) por seguridad, como se pidió para optoacopladores 4N25
-        for pin in [PIN_LAVADORA_1, PIN_LAVADORA_2, PIN_LAVADORA_3]:
+        for equipo in EQUIPOS.values():
             try:
-                GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+                GPIO.setup(equipo['gpio'], GPIO.OUT, initial=GPIO.LOW)
             except Exception as e:
-                print(f"Error setup pin {pin}: {e}")
+                print(f"Error setup pin {equipo['gpio']} ({equipo['nombre']}): {e}")
 
 def limpiar_pines():
     """Libera los pines de la Raspberry Pi al apagar el servidor."""
@@ -98,9 +102,14 @@ def limpiar_pines():
         except Exception as e:
             print(f"Error al limpiar pines: {e}")
 
-async def activar_lavadora(pin: int):
-    """Manda un pulso de 0.5s de manera asíncrona (HIGH) y vuelve a LOW"""
-    print(f"Hardware: Iniciando pulso en PIN {pin} por 0.5s...")
+async def activar_lavadora(equipo_id: str):
+    """Manda un pulso de 0.5s al equipo dado su ID en el diccionario EQUIPOS."""
+    equipo = EQUIPOS.get(equipo_id)
+    if not equipo:
+        print(f"Hardware: Equipo '{equipo_id}' no encontrado en EQUIPOS.")
+        return
+    pin = equipo['gpio']
+    print(f"Hardware: Iniciando pulso en {equipo['nombre']} (PIN {pin}) por 0.5s...")
     if HARDWARE_AVAILABLE:
         try:
             GPIO.output(pin, GPIO.HIGH)
@@ -114,4 +123,4 @@ async def activar_lavadora(pin: int):
             GPIO.output(pin, GPIO.LOW)
         except Exception as e:
             print(f"Error desactivando PIN {pin}: {e}")
-    print(f"Hardware: Fin de pulso en PIN {pin}.")
+    print(f"Hardware: Fin de pulso en {equipo['nombre']} (PIN {pin}).")

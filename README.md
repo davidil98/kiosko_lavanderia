@@ -9,9 +9,10 @@ El sistema controla directamente el hardware de la lavandería (lavadoras LG Inv
 ## 📸 Características Principales
 
 * **Arquitectura Web-Based:** Construida con [FastAPI / NiceGUI] para permitir múltiples pantallas simultáneas a través de la red local.
-* **Sistema de Cola Asíncrono (Cuello de botella eliminado):** * La **Pantalla Cliente (Touch)** procesa el cobro y se libera inmediatamente para el siguiente usuario.
+* **Sistema de Cola Asíncrono:**
+* La **Pantalla Cliente (Touch)** procesa el cobro y se libera inmediatamente para el siguiente usuario.
   * La **Pantalla Admin (Mostrador)** recibe las órdenes pendientes, permitiendo al operador pesar la ropa, asignar la máquina y disparar el inicio del ciclo de forma segura.
-* **Control de Hardware Aislado:** Mapeo de señales para lectura de monederos mecánicos y disparo de pulsos de inicio en máquinas industriales de 24V.
+* **Control de Hardware Aislado:** Mapeo de señales para lectura de monederos mecánicos y disparo de pulsos de inicio en máquinas industriales de 6V.
 * **Registro de Ventas en Tiempo Real:** Base de datos `SQLite3` integrada (`ecoluna_datos.db`) para llevar el control financiero e historial de equipos.
 
 ---
