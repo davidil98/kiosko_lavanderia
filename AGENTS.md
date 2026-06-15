@@ -13,6 +13,8 @@ src/web_app/main.py         # Main NiceGUI app entry point
 src/web_app/models.py       # State management (KioskoState dataclass)
 src/web_app/database_web.py # Async SQLite operations
 src/web_app/hardware.py     # GPIO control for machines/coins
+src/web_app/metodos_pago.py # Strategy pattern for payment methods (monedas, QR, etc.)
+src/web_app/mp_qr.py        # Mercado Pago QR API integration
 src/kiosko_pago.py          # Legacy customtkinter desktop app (deprecated)
 src/database.py             # Legacy sync database module
 src/mp_dev/                 # MercadoPago integration scripts
@@ -225,9 +227,11 @@ src/
     models.py        # Data classes and KioskoState
     database_web.py  # Async DB operations
     hardware.py      # GPIO and machine control
+    metodos_pago.py  # Strategy pattern: MetodoPago ABC + Monedas/QR/Terminal
+    mp_qr.py         # MercadoPago QR API client (crear/cancelar/verificar)
   kiosko_pago.py     # Legacy desktop app (do not modify)
   database.py        # Legacy sync DB (do not modify)
-  mp_dev/            # MercadoPago integration (standalone scripts)
+  mp_dev/            # MercadoPago Point terminal scripts (reference, not in main flow)
 ```
 
 ### Comments
@@ -261,7 +265,12 @@ Create `.env` in project root (not committed to git):
 
 ```
 BYPASS_PASSWORD=admin123   # Password for courtesy/bypass service
+MP_TEST_TOKEN=APP_USR-...  # MercadoPago test access token
+MP_PROD_TOKEN=APP_USR-...  # MercadoPago production access token (when ready)
+MP_ENVIRONMENT=test        # 'test' or 'prod' — selects which token is used
 ```
+
+**Switching to production:** update `MP_PROD_TOKEN` and change `MP_ENVIRONMENT=prod` in `.env`. No code changes needed. Restart the app to apply.
 
 ---
 
@@ -275,6 +284,35 @@ BYPASS_PASSWORD=admin123   # Password for courtesy/bypass service
 1. Edit `EQUIPOS` dict in `hardware.py`
 2. Add GPIO pin mapping
 3. Physical wiring to Raspberry Pi required
+
+### Adding a New Payment Method
+Architecture: **Strategy + Open/Closed**. `MetodoPago` is the abstract base in `src/web_app/metodos_pago.py`.
+
+1. Create a new class extending `MetodoPago` in `metodos_pago.py`
+2. Implement `async procesar_pago() -> ResultadoPago`
+3. Implement `render_panel(on_cancelar, on_pago_exitoso)` using NiceGUI
+4. Add the class to `METODOS_PAGO_DISPONIBLES`
+5. The kiosko will auto-show it in paso 2 (selección de método de pago)
+
+Currently implemented:
+- `MetodoMonedas` (`codigo="monedas"`) — coin acceptor
+- `MetodoQR` (`codigo="qr"`) — Mercado Pago in-store QR (uses `mp_qr.py`)
+- `MetodoTerminalPoint` (`codigo="terminal"`) — placeholder for future Point integration
+
+### Sub-state Pattern for Wizard Pasos
+The wizard uses `paso_actual: int` (0, 1, 2, 3, 4) plus boolean flags for sub-states inside a paso:
+- `mostrando_sub_lavar` — true while showing the Lavar sub-menu inside paso 0
+- `mostrando_metodos_pago` — true while showing payment method selection inside paso 2
+
+**Do not use float or non-int types for `paso_actual`.** When adding a new sub-state, follow this pattern (set the boolean + `_trigger_change()`).
+
+### MercadoPago Production Migration
+- Set `MP_PROD_TOKEN` in `.env` with your production access token
+- Change `MP_ENVIRONMENT=prod` in `.env`
+- No code changes required — `mp_qr.py` auto-selects the right token
+
+### Blackout Recovery (QR Orders)
+On startup, `mp_qr.buscar_y_cancelar_ordenes_abiertas()` runs in the background via `app.on_startup`. It scans the latest open QR orders in MP and cancels them, so a power outage doesn't leave stale `open` orders blocking future sales.
 
 ### Database Migrations
 Add columns safely in `database_web.py`:

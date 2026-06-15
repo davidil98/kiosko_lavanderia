@@ -80,7 +80,7 @@ PASOS = [
     "1. Selección de Servicio",
     "2. Ingresar Nombre",
     "3. Pesar Ropa",
-    "4. Insertar Monedas",
+    "4. Pagar",
     "5. Pago Exitoso",
 ]
 
@@ -95,11 +95,18 @@ class KioskoState:
         self.en_procesamiento: bool = False
         self.alerta_excedente_mostrada: bool = False
         self.ultimo_id_transaccion: Optional[int] = None
-        # 0=seleccion, 0.5=sub-seleccion lavado personalizado,
-        # 1=nombre, 2=pesar, 3=pago, 4=exito
+        # 0=seleccion, 1=nombre, 2=pesar, 3=pago, 4=exito
+        # Sub-estados: mostrando_sub_lavar (paso 0) y mostrando_metodos_pago (paso 2)
         self.paso_actual: int = 0
         self.mostrando_sub_lavar: bool = (
             False  # True cuando se muestran sub-opciones de Lavar
+        )
+        self.mostrando_metodos_pago: bool = (
+            False  # True cuando se muestran opciones de método de pago
+        )
+        self.metodo_pago_codigo: Optional[str] = None  # 'monedas' | 'qr' | 'terminal'
+        self.metodo_pago_instancia: Optional[object] = (
+            None  # Instancia activa de MetodoPago
         )
         self.callback_on_change = None
 
@@ -118,6 +125,7 @@ class KioskoState:
                 self.peso_ingresado = 0.0
                 self.exito = False
                 self.mostrando_sub_lavar = False
+                self.mostrando_metodos_pago = False
                 self.paso_actual = 1
                 self._trigger_change()
                 return
@@ -125,6 +133,11 @@ class KioskoState:
     def mostrar_sub_lavar(self):
         """Muestra el sub-menú de Lavado (Autolavado vs Personalizado)."""
         self.mostrando_sub_lavar = True
+        self._trigger_change()
+
+    def mostrar_metodos_pago(self):
+        """Muestra el sub-menú de selección de método de pago (paso 2)."""
+        self.mostrando_metodos_pago = True
         self._trigger_change()
 
     def confirmar_nombre(self, nombre: str):
@@ -135,9 +148,7 @@ class KioskoState:
     def ingresar_dinero(self, monto: int):
         if not self.servicio_seleccionado or self.exito:
             return
-        # El servicio personalizado no requiere pago en kiosko
-        if self.servicio_seleccionado.modalidad == "personalizado":
-            return
+        # Los personalizados también pueden pagarse en el kiosko (cualquier método)
         self.dinero_ingresado += monto
         self._trigger_change()
 
@@ -182,4 +193,7 @@ class KioskoState:
         self.ultimo_id_transaccion = None
         self.paso_actual = 0
         self.mostrando_sub_lavar = False
+        self.mostrando_metodos_pago = False
+        self.metodo_pago_codigo = None
+        self.metodo_pago_instancia = None
         self._trigger_change()

@@ -7,6 +7,12 @@ from models import (
     PASOS,
     get_limite_kg,
 )
+from metodos_pago import (
+    MetodoPago,
+    MetodoMonedas,
+    MetodoQR,
+    METODOS_PAGO_DISPONIBLES,
+)
 import database_web
 import hardware
 import os
@@ -66,6 +72,21 @@ hardware.init_gpio_lavadoras()
 
 database_web.init_db()
 app.add_static_files("/media", MEDIA_DIR)
+
+
+async def _recuperar_ordenes_huérfanas():
+    """Tras un apagón, busca y cancela órdenes QR que quedaron abiertas."""
+    try:
+        from mp_qr import buscar_y_cancelar_ordenes_abiertas
+
+        n = await buscar_y_cancelar_ordenes_abiertas()
+        if n > 0:
+            print(f"[startup] {n} orden(es) QR huérfana(s) cancelada(s) por apagón.")
+    except Exception as e:
+        print(f"[startup] Error recuperando órdenes huérfanas: {e}")
+
+
+app.on_startup(_recuperar_ordenes_huérfanas)
 
 # ──────────────────────────────────────────────
 #  CSS COMPARTIDO
@@ -627,234 +648,230 @@ def kiosko_cliente():
                         )
 
                     # ══════════════════════════════
-                    #  PASO 2 — PESAR ROPA
+                    #  PASO 2 — PESAR ROPA / SELECCIÓN DE MÉTODO
                     # ══════════════════════════════
                     elif state.paso_actual == 2:
-                        state.peso_ingresado = 0.0
-                        peso_buffer = {"val": "0"}
-                        max_kg = state.get_limite_kg()
-
-                        with (
-                            ui.element("div")
-                            .props("id=nombre-panel")
-                            .classes("mx-auto")
-                        ):
+                        if state.mostrando_metodos_pago:
+                            # ── Sub-estado: mostrar métodos de pago ──
+                            ui.html('<p class="instruccion">¿Cómo deseas pagar?</p>')
                             with ui.element("div").style(
-                                "display:flex;align-items:center;gap:10px;margin-bottom:6px;"
+                                "display:flex; gap:24px; flex-wrap:wrap; justify-content:center;"
                             ):
-                                ui.image("/media/icons/scale.svg").style(
-                                    "width:32px;height:32px;object-fit:contain;"
-                                )
-                                ui.label("Ingresa el peso de tu ropa").style(
-                                    "font-size:1.5rem;font-weight:800;color:#e2e8f0;margin:0;"
-                                )
-                            ui.label(
-                                "Pesa tu ropa en la báscula e ingresa el valor (kg)."
-                            ).style(
-                                "font-size:0.95rem;color:#94a3b8;margin-bottom:6px;"
+                                for metodo_cls in METODOS_PAGO_DISPONIBLES:
+                                    with (
+                                        ui.element("div")
+                                        .classes("card-servicio")
+                                        .on(
+                                            "click",
+                                            lambda cls=metodo_cls: (
+                                                seleccionar_metodo_pago(cls)
+                                            ),
+                                        )
+                                    ):
+                                        ui.image(metodo_cls.icono).style(
+                                            "width:80px;height:80px;object-fit:contain;"
+                                        )
+                                        ui.html(
+                                            f'<span style="font-size:1.2rem;font-weight:800;color:#e2e8f0;">{metodo_cls.nombre}</span>'
+                                        )
+                                        ui.html(
+                                            f'<span style="font-size:0.78rem;color:#94a3b8;">{metodo_cls.descripcion}</span>'
+                                        )
+
+                            # Para servicios personalizados, ofrecer también la opción de pagar en mostrador
+                            es_personalizado = (
+                                state.servicio_seleccionado
+                                and state.servicio_seleccionado.modalidad
+                                == "personalizado"
                             )
-                            if max_kg:
-                                ui.html(
-                                    f'<div style="font-size:0.85rem;color:#fde68a;font-weight:700;margin-bottom:10px;">'
-                                    f"Capacidad máxima: {max_kg} kg</div>"
-                                )
+                            if es_personalizado:
+                                ui.button(
+                                    "Pagar en mostrador al recibir",
+                                    on_click=lambda: asyncio.create_task(
+                                        finalizar_servicio_personalizado()
+                                    ),
+                                ).classes(
+                                    "btn-confirmar-nombre max-w-sm mx-auto mt-4"
+                                ).style("background:#a78bfa;")
 
-                            display_peso = ui.label("0 kg").classes("numpad-display")
-
-                            def presionar_num(d):
-                                v = peso_buffer["val"]
-                                if d == "⌫":
-                                    v = v[:-1] if len(v) > 1 else "0"
-                                elif d == ".":
-                                    if "." not in v:
-                                        v += "."
-                                elif v == "0":
-                                    v = d
-                                else:
-                                    if len(v) < 5:
-                                        v += d
-                                peso_buffer["val"] = v
-                                state.peso_ingresado = (
-                                    float(v) if v not in ("", ".") else 0.0
-                                )
-                                display_peso.set_text(f"{v} kg")
+                            ui.button(
+                                "← Volver",
+                                on_click=lambda: (
+                                    setattr(state, "mostrando_metodos_pago", False),
+                                    kiosko_ui.refresh(),
+                                ),
+                            ).classes(
+                                "btn-confirmar-nombre max-w-xs mx-auto mt-6"
+                            ).style("background:#334155;")
+                        else:
+                            # ── Estado principal: ingreso de peso ──
+                            state.peso_ingresado = 0.0
+                            peso_buffer = {"val": "0"}
+                            max_kg = state.get_limite_kg()
 
                             with (
                                 ui.element("div")
-                                .classes("numpad mx-auto mt-2")
-                                .style("max-width:280px;")
+                                .props("id=nombre-panel")
+                                .classes("mx-auto")
                             ):
-                                for d in [
-                                    "7",
-                                    "8",
-                                    "9",
-                                    "4",
-                                    "5",
-                                    "6",
-                                    "1",
-                                    "2",
-                                    "3",
-                                    ".",
-                                    "0",
-                                    "⌫",
-                                ]:
-                                    color = (
-                                        "bg-red-900"
-                                        if d == "⌫"
-                                        else (
-                                            "bg-slate-600"
-                                            if d == "."
-                                            else "bg-slate-700"
-                                        )
-                                    )
-                                    ui.button(
-                                        d, on_click=lambda x=d: presionar_num(x)
-                                    ).classes(
-                                        f"numpad-btn {color} text-white font-bold"
-                                    )
-
-                            def ir_a_pago_desde_peso():
-                                if state.peso_ingresado <= 0:
-                                    ui.notify(
-                                        "Por favor ingresa un peso válido mayor a 0.",
-                                        type="warning",
-                                    )
-                                    return
-                                # BLOQUEO: si el peso excede la capacidad de la(s) máquina(s),
-                                # no se permite continuar. Se limpia el peso y se notifica.
-                                if max_kg and state.peso_ingresado > max_kg:
-                                    ui.notify(
-                                        f"Retire peso de carga que no exceda los {max_kg} kg "
-                                        f"y divida su carga solicitando más servicios.",
-                                        type="negative",
-                                        position="top",
-                                        timeout=10000,
-                                    )
-                                    state.peso_ingresado = 0.0
-                                    peso_buffer["val"] = "0"
-                                    display_peso.set_text("0 kg")
-                                    return
-                                # Si es personalizado, salta el paso de pago
-                                if (
-                                    state.servicio_seleccionado
-                                    and state.servicio_seleccionado.modalidad
-                                    == "personalizado"
+                                with ui.element("div").style(
+                                    "display:flex;align-items:center;gap:10px;margin-bottom:6px;"
                                 ):
-                                    asyncio.create_task(
-                                        finalizar_servicio_personalizado()
+                                    ui.image("/media/icons/scale.svg").style(
+                                        "width:32px;height:32px;object-fit:contain;"
                                     )
-                                else:
-                                    state.paso_actual = 3
-                                    kiosko_ui.refresh()
+                                    ui.label("Ingresa el peso de tu ropa").style(
+                                        "font-size:1.5rem;font-weight:800;color:#e2e8f0;margin:0;"
+                                    )
+                                ui.label(
+                                    "Pesa tu ropa en la báscula e ingresa el valor (kg)."
+                                ).style(
+                                    "font-size:0.95rem;color:#94a3b8;margin-bottom:6px;"
+                                )
+                                if max_kg:
+                                    ui.html(
+                                        f'<div style="font-size:0.85rem;color:#fde68a;font-weight:700;margin-bottom:10px;">'
+                                        f"Capacidad máxima: {max_kg} kg</div>"
+                                    )
 
-                            ui.button(
-                                "Continuar", on_click=ir_a_pago_desde_peso
-                            ).classes("btn-confirmar-nombre max-w-sm mx-auto mt-4")
+                                display_peso = ui.label("0 kg").classes(
+                                    "numpad-display"
+                                )
+
+                                def presionar_num(d):
+                                    v = peso_buffer["val"]
+                                    if d == "⌫":
+                                        v = v[:-1] if len(v) > 1 else "0"
+                                    elif d == ".":
+                                        if "." not in v:
+                                            v += "."
+                                    elif v == "0":
+                                        v = d
+                                    else:
+                                        if len(v) < 5:
+                                            v += d
+                                    peso_buffer["val"] = v
+                                    state.peso_ingresado = (
+                                        float(v) if v not in ("", ".") else 0.0
+                                    )
+                                    display_peso.set_text(f"{v} kg")
+
+                                with (
+                                    ui.element("div")
+                                    .classes("numpad mx-auto mt-2")
+                                    .style("max-width:280px;")
+                                ):
+                                    for d in [
+                                        "7",
+                                        "8",
+                                        "9",
+                                        "4",
+                                        "5",
+                                        "6",
+                                        "1",
+                                        "2",
+                                        "3",
+                                        ".",
+                                        "0",
+                                        "⌫",
+                                    ]:
+                                        color = (
+                                            "bg-red-900"
+                                            if d == "⌫"
+                                            else (
+                                                "bg-slate-600"
+                                                if d == "."
+                                                else "bg-slate-700"
+                                            )
+                                        )
+                                        ui.button(
+                                            d, on_click=lambda x=d: presionar_num(x)
+                                        ).classes(
+                                            f"numpad-btn {color} text-white font-bold"
+                                        )
+
+                                def ir_a_pago_desde_peso():
+                                    if state.peso_ingresado <= 0:
+                                        ui.notify(
+                                            "Por favor ingresa un peso válido mayor a 0.",
+                                            type="warning",
+                                        )
+                                        return
+                                    # BLOQUEO: si el peso excede la capacidad de la(s) máquina(s),
+                                    # no se permite continuar. Se limpia el peso y se notifica.
+                                    if max_kg and state.peso_ingresado > max_kg:
+                                        ui.notify(
+                                            f"Retire peso de carga que no exceda los {max_kg} kg "
+                                            f"y divida su carga solicitando más servicios.",
+                                            type="negative",
+                                            position="top",
+                                            timeout=10000,
+                                        )
+                                        state.peso_ingresado = 0.0
+                                        peso_buffer["val"] = "0"
+                                        display_peso.set_text("0 kg")
+                                        return
+                                    # Tanto personalizado como autoservicio pasan por selección de pago
+                                    state.mostrar_metodos_pago()
+                                    if _kiosko_ui_ref:
+                                        _kiosko_ui_ref()
+
+                                ui.button(
+                                    "Continuar", on_click=ir_a_pago_desde_peso
+                                ).classes("btn-confirmar-nombre max-w-sm mx-auto mt-4")
 
                     # ══════════════════════════════
-                    #  PASO 3 — PAGO (solo autoservicio)
+                    #  PASO 3 — PAGO (delegado al método seleccionado)
                     # ══════════════════════════════
                     elif state.paso_actual == 3:
-                        pct = (
-                            min(
-                                100,
-                                int(
-                                    state.dinero_ingresado
-                                    / state.servicio_seleccionado.precio
-                                    * 100
-                                ),
-                            )
-                            if state.servicio_seleccionado
-                            and state.servicio_seleccionado.precio > 0
-                            else 100
-                        )
-                        faltante = state.get_faltante()
+                        if not state.metodo_pago_instancia:
+                            state.metodo_pago_instancia = MetodoMonedas(state)
+                            state.metodo_pago_codigo = "monedas"
 
-                        if (
-                            state.dinero_ingresado > state.servicio_seleccionado.precio
-                            and not state.alerta_excedente_mostrada
-                        ):
-                            ui.notify(
-                                "Has ingresado más dinero del necesario.",
-                                type="warning",
-                                position="top",
-                                timeout=8000,
-                            )
-                            state.alerta_excedente_mostrada = True
-
-                        with ui.element("div").props("id=pago-panel"):
-                            ui.html(
-                                f'<p style="font-size:0.88rem;color:#94a3b8;margin:0 0 2px;font-weight:600;">Cliente</p>'
-                            )
-                            ui.html(
-                                f'<p style="font-size:1.3rem;font-weight:800;color:#e2e8f0;margin:0 0 4px;">{state.nombre_cliente}</p>'
-                            )
-                            ui.html(
-                                f'<p style="font-size:0.82rem;color:#64748b;margin:0 0 2px;">Servicio: <strong style="color:#93c5fd;">{state.servicio_seleccionado.nombre}</strong></p>'
-                            )
-                            ui.html(
-                                f'<p style="font-size:0.82rem;color:#64748b;margin:0 0 10px;">Peso: <strong style="color:#93c5fd;">{state.peso_ingresado} kg</strong></p>'
-                            )
-
-                            with ui.element("div").classes("monto-box"):
-                                ui.html(
-                                    '<div class="monto-label">Falta por insertar</div>'
-                                )
-                                ui.html(f'<div class="monto-valor">${faltante}</div>')
-                                ui.html(
-                                    f'<div class="monto-sub">Ingresado ${state.dinero_ingresado} de ${state.servicio_seleccionado.precio}</div>'
-                                )
-
-                            ui.html(
-                                f'<div class="progress-bar-bg"><div class="progress-bar-fill" style="width:{pct}%;"></div></div>'
-                            )
-                            ui.html(
-                                f'<div class="progress-pct">{pct}% completado — inserte monedas en el dispensador</div>'
-                            )
-
-                            btn_confirmar = ui.button("✓ Confirmar y Registrar Pago")
-                            if state.puede_pagar():
-                                btn_confirmar.on("click", finalizar_pago)
-                                btn_confirmar.style(
-                                    "width:100%; margin-top:16px; padding:14px; font-size:1.1rem; font-weight:700; cursor:pointer;"
-                                )
-                            else:
-                                btn_confirmar.disable()
-                                btn_confirmar.style(
-                                    "width:100%; margin-top:16px; padding:14px; background:#1e293b; color:#475569; border-radius:11px; font-size:1.1rem; font-weight:700; cursor:not-allowed;"
-                                )
-
-                            async def confirmar_cancelacion():
-                                if state.dinero_ingresado > 0:
-                                    with ui.dialog() as dialog, ui.card():
-                                        ui.label("Advertencia").style(
-                                            "font-size:1.25rem;font-weight:bold;color:#ef4444;margin-bottom:8px;"
+                        async def _on_cancelar():
+                            if (
+                                state.metodo_pago_codigo == "monedas"
+                                and state.dinero_ingresado > 0
+                            ):
+                                with ui.dialog() as dialog, ui.card():
+                                    ui.label("Advertencia").style(
+                                        "font-size:1.25rem;font-weight:bold;color:#ef4444;margin-bottom:8px;"
+                                    )
+                                    ui.label(
+                                        "Tienes saldo ingresado. ¿Deseas cancelar? Deberías reclamarlo en mostrador."
+                                    ).style("color:#64748b;white-space:normal;")
+                                    with ui.row().style(
+                                        "width:100%;justify-content:flex-end;margin-top:16px;gap:8px;"
+                                    ):
+                                        ui.button(
+                                            "No, continuar", on_click=dialog.close
                                         )
-                                        ui.label(
-                                            "Tienes saldo ingresado. ¿Deseas cancelar? Deberías reclamarlo en mostrador."
-                                        ).style("color:#64748b;white-space:normal;")
-                                        with ui.row().style(
-                                            "width:100%;justify-content:flex-end;margin-top:16px;gap:8px;"
-                                        ):
-                                            ui.button(
-                                                "No, continuar", on_click=dialog.close
-                                            )
-                                            ui.button(
-                                                "Sí, cancelar",
-                                                on_click=lambda: (
-                                                    dialog.close(),
-                                                    state.reset(),
-                                                ),
-                                                color="red",
-                                            )
-                                    dialog.open()
-                                else:
-                                    state.reset()
+                                        ui.button(
+                                            "Sí, cancelar",
+                                            on_click=lambda: (
+                                                dialog.close(),
+                                                state.reset(),
+                                            ),
+                                            color="red",
+                                        )
+                                dialog.open()
+                                return
+                            if state.metodo_pago_instancia is not None and hasattr(
+                                state.metodo_pago_instancia, "cancelar"
+                            ):
+                                await state.metodo_pago_instancia.cancelar()
+                            # Volver al paso 0 (selección de servicio) — no solo al sub-menú
+                            state.reset()
+                            if _kiosko_ui_ref:
+                                _kiosko_ui_ref()
 
-                            btn_cancelar = ui.button(
-                                "✕ Cancelar y regresar", color="red"
-                            ).classes("btn-cancelar")
-                            btn_cancelar.on("click", confirmar_cancelacion)
+                        async def _on_pago_exitoso():
+                            await finalizar_pago()
+
+                        state.metodo_pago_instancia.render_panel(
+                            on_cancelar=_on_cancelar,
+                            on_pago_exitoso=_on_pago_exitoso,
+                        )
 
                     # ══════════════════════════════
                     #  PASO 4 — ÉXITO
@@ -916,30 +933,93 @@ def kiosko_cliente():
                         """)
 
     state.set_callback(kiosko_ui.refresh)
+    _set_kiosko_ui_ref(kiosko_ui.refresh)
     kiosko_ui()
+
+
+# Referencia module-level al kiosko_ui (closure) para que funciones fuera de la page puedan refrescarlo
+_kiosko_ui_ref = None
+
+
+def _set_kiosko_ui_ref(ref):
+    global _kiosko_ui_ref
+    _kiosko_ui_ref = ref
 
 
 async def finalizar_pago():
     """Autoservicio: registra en BD, notifica admin y espera 7s."""
+    metodo = state.metodo_pago_codigo or "monedas"
+    extra_ref = (
+        state.metodo_pago_instancia.orden_id
+        if state.metodo_pago_instancia is not None
+        and getattr(state.metodo_pago_instancia, "orden_id", None)
+        else ""
+    )
+    es_fallback = state.metodo_pago_instancia is not None and getattr(
+        state.metodo_pago_instancia, "fallback_estatico", False
+    )
+    modalidad = f"autoservicio-{metodo}{'-fallback' if es_fallback else ''}"
+    es_pers = state.servicio_seleccionado.modalidad == "personalizado"
+    if es_pers:
+        modalidad = f"personalizado-{metodo}{'-fallback' if es_fallback else ''}"
+    print(
+        f"[main] finalizar_pago: cliente={state.nombre_cliente} "
+        f"servicio={state.servicio_seleccionado.nombre} "
+        f"metodo={metodo} modalidad={modalidad} mp_orden_id={extra_ref}"
+    )
     nuevo_id = await database_web.registrar_venta_async(
         servicio=state.servicio_seleccionado.nombre,
         monto=state.servicio_seleccionado.precio,
-        ingresado=state.dinero_ingresado,
-        cambio=state.get_cambio(),
+        ingresado=state.dinero_ingresado
+        if metodo == "monedas"
+        else state.servicio_seleccionado.precio,
+        cambio=state.get_cambio() if metodo == "monedas" else 0,
         equipo="N/A",
         duracion=state.servicio_seleccionado.duracion_min,
         nombre_cliente=state.nombre_cliente,
         peso_kg=state.peso_ingresado,
-        modalidad="autoservicio",
+        modalidad=modalidad,
     )
+    if extra_ref:
+        print(f"[main] Orden MP asociada: {extra_ref}")
     state.procesar_exito(nuevo_id)
     notificar_admin()
     await asyncio.sleep(7)
     state.reset()
 
 
+async def seleccionar_metodo_pago(metodo_cls):
+    """Inicializa el método de pago seleccionado y avanza al paso 3."""
+    state.metodo_pago_instancia = metodo_cls(state)
+    state.metodo_pago_codigo = metodo_cls.codigo
+
+    if metodo_cls.codigo == "qr":
+        resultado = await state.metodo_pago_instancia.procesar_pago()
+        if not resultado.exito:
+            print(f"[main] No se pudo crear la orden QR: {resultado.mensaje}")
+            ui.notify(
+                f"No se pudo generar el QR: {resultado.mensaje}",
+                type="negative",
+                position="top",
+                timeout=8000,
+            )
+            state.metodo_pago_instancia = None
+            state.metodo_pago_codigo = None
+            return
+
+    state.paso_actual = 3
+    if _kiosko_ui_ref:
+        _kiosko_ui_ref()
+
+
 async def finalizar_servicio_personalizado():
-    """Personalizado: registra con precio del servicio (pagado en mostrador), notifica admin y espera 7s."""
+    """Personalizado: registra con precio del servicio (pagado en mostrador),
+    notifica admin y espera 7s. Si el cliente ya pagó en el kiosko, el método
+    de pago registra el monto correspondiente y se marca con modalidad=autoservicio-*."""
+    print(
+        f"[main] finalizar_servicio_personalizado: cliente={state.nombre_cliente} "
+        f"servicio={state.servicio_seleccionado.nombre} pendiente_pago_en_mostrador"
+    )
     nuevo_id = await database_web.registrar_venta_async(
         servicio=state.servicio_seleccionado.nombre,
         monto=state.servicio_seleccionado.precio,
@@ -949,7 +1029,7 @@ async def finalizar_servicio_personalizado():
         duracion=state.servicio_seleccionado.duracion_min,
         nombre_cliente=state.nombre_cliente,
         peso_kg=state.peso_ingresado,
-        modalidad="personalizado",
+        modalidad="personalizado-pendiente-pago",
     )
     state.procesar_exito(nuevo_id)
     notificar_admin()
@@ -994,6 +1074,69 @@ def admin_login():
             ui.button("Ingresar", on_click=intentar_login).props(
                 "color=primary"
             ).classes("w-full text-lg font-bold py-3")
+
+
+# ── Diálogo de confirmación de pago QR (admin) ────────────────────────────────
+def abrir_dialogo_confirmar_qr(id_transaccion, refresh_callback):
+    """Abre un diálogo que pide la contraseña del admin para confirmar
+    que un pago QR fue recibido. Si la contraseña es correcta, marca la
+    orden como pagada (estado 'Pendiente' + nota de auditoría)."""
+    PASSWORD = os.getenv("BYPASS_PASSWORD", "admin123")
+
+    with ui.dialog() as dialog, ui.card().style("min-width:380px;"):
+        ui.html(
+            '<div style="font-size:1.2rem;font-weight:800;color:#92400e;margin-bottom:6px;">'
+            "⚠️ Confirmar pago QR"
+            "</div>"
+        )
+        ui.html(
+            f'<div style="font-size:0.88rem;color:#64748b;margin-bottom:14px;">'
+            f"Vas a confirmar el pago de la orden <b>#{id_transaccion}</b>.<br>"
+            "Verifica que el cliente haya pagado antes de continuar."
+            "</div>"
+        )
+        pwd_input = (
+            ui.input("Contraseña", password=True)
+            .props("outlined dense")
+            .classes("w-full mb-3")
+        )
+        error_label = ui.html("")
+
+        async def do_confirm():
+            if pwd_input.value == PASSWORD:
+                ok = await database_web.confirmar_pago_qr_async(
+                    id_transaccion, usuario_actual()
+                )
+                if ok:
+                    ui.notify(
+                        f"Pago de orden #{id_transaccion} confirmado.",
+                        type="positive",
+                    )
+                    dialog.close()
+                    if refresh_callback is not None:
+                        try:
+                            res = refresh_callback()
+                            if asyncio.iscoroutine(res):
+                                asyncio.create_task(res)
+                        except Exception:
+                            pass
+                else:
+                    error_label.set_content(
+                        '<div style="color:#ef4444;font-size:0.85rem;margin-bottom:6px;">'
+                        "La orden ya estaba confirmada o no existe."
+                        "</div>"
+                    )
+            else:
+                error_label.set_content(
+                    '<div style="color:#ef4444;font-size:0.85rem;margin-bottom:6px;">'
+                    "Contraseña incorrecta."
+                    "</div>"
+                )
+
+        with ui.row().classes("w-full justify-end gap-2 mt-2"):
+            ui.button("Cancelar", on_click=dialog.close).props("outline")
+            ui.button("Confirmar pago", on_click=do_confirm).props("color=warning")
+    dialog.open()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1222,19 +1365,52 @@ async def admin_autoservicio():
         )
         return f'<span class="orden-servicio-badge {cls}">{tipo}</span>'
 
+    def _badge_metodo_pago(modalidad):
+        """Devuelve un pequeño badge con el método de pago usado."""
+        if not modalidad:
+            return ""
+        m = modalidad
+        if "qr-fallback" in m or "qr" in m and "fallback" in m:
+            color_bg, color_fg = "#fef3c7", "#92400e"
+            label = "⚠️ QR (verificar)"
+        elif "qr" in m:
+            color_bg, color_fg = "#dbeafe", "#1d4ed8"
+            label = "QR"
+        elif "terminal" in m or "point" in m:
+            color_bg, color_fg = "#fce7f3", "#be185d"
+            label = "Point"
+        elif "monedas" in m:
+            color_bg, color_fg = "#d1fae5", "#065f46"
+            label = "Efectivo"
+        else:
+            return ""
+        return f'<span class="orden-servicio-badge" style="background:{color_bg};color:{color_fg};">{label}</span>'
+
     def _render_auto_pendiente(v, en_proceso):
         nombre = v.get("nombre_cliente") or "Sin nombre"
         peso = v.get("peso_kg", 0) or 0
+        modalidad = v.get("modalidad", "")
+        notas = v.get("notas") or ""
+        qr_pendiente = "qr" in modalidad and "PAGO CONFIRMADO" not in notas
         with ui.element("div").classes("orden-card"):
             with ui.element("div").style("flex:1;min-width:0;"):
                 ui.html(
-                    f'<div class="orden-numero">Orden #{v["id_transaccion"]}</div>{_badge_servicio(v["tipo_servicio"])}'
+                    f'<div class="orden-numero">Orden #{v["id_transaccion"]}</div>'
+                    f"{_badge_servicio(v['tipo_servicio'])} "
+                    f"{_badge_metodo_pago(modalidad)}"
                 )
                 ui.html(f'<div class="orden-nombre">{nombre}</div>')
                 ui.html(
                     f'<div class="orden-meta">{v["fecha_hora"]} · {peso} kg · Pagado: <strong>${v["monto_pagado"]}</strong></div>'
                 )
             with ui.element("div").style("flex-shrink:0;"):
+                if qr_pendiente:
+                    ui.button(
+                        "Confirmar pago QR",
+                        on_click=lambda vid=v["id_transaccion"]: (
+                            abrir_dialogo_confirmar_qr(vid, vista_ordenes)
+                        ),
+                    ).props("color=warning size=sm").classes("font-bold mb-2")
                 ui.html('<div class="maquina-label">Asignar a:</div>')
                 with ui.element("div").classes("maquinas-row"):
                     for equipo_id, equipo in hardware.EQUIPOS.items():
@@ -1307,10 +1483,13 @@ async def admin_autoservicio():
             except Exception:
                 pass
 
+        modalidad = v.get("modalidad", "")
         with ui.element("div").classes("orden-card en-proceso"):
             with ui.element("div").style("flex:1;min-width:0;"):
                 ui.html(
-                    f'<div class="orden-numero">Orden #{v["id_transaccion"]}</div>{_badge_servicio(v["tipo_servicio"])} '
+                    f'<div class="orden-numero">Orden #{v["id_transaccion"]}</div>'
+                    f"{_badge_servicio(v['tipo_servicio'])} "
+                    f"{_badge_metodo_pago(modalidad)} "
                     f'<span style="font-size:0.78rem;color:#b45309;font-weight:700;display:inline-flex;align-items:center;gap:4px;">'
                     f'<img src="/media/icons/gear.svg" style="width:14px;height:14px;"> {v["id_equipo"]}</span>'
                 )
@@ -1495,6 +1674,8 @@ async def admin_personalizado():
         peso = orden.get("peso_kg", 0) or 0
         notas = orden.get("notas") or ""
         servicio = orden.get("tipo_servicio", "")
+        modalidad = orden.get("modalidad", "")
+        qr_pendiente = "qr" in modalidad and "PAGO CONFIRMADO" not in notas
 
         with ui.element("div").classes("kanban-card"):
             ui.html(f'<div class="kanban-card-nombre">{nombre}</div>')
@@ -1502,6 +1683,15 @@ async def admin_personalizado():
                 f'<div class="kanban-card-meta">#{orden["id_transaccion"]} · {servicio} · {peso} kg</div>'
             )
             ui.html(f'<div class="kanban-card-meta">{orden["fecha_hora"]}</div>')
+            if qr_pendiente:
+                ui.button(
+                    "Confirmar pago QR",
+                    on_click=lambda vid=orden["id_transaccion"]: (
+                        abrir_dialogo_confirmar_qr(vid, ref)
+                    ),
+                ).props("color=warning size=sm").classes(
+                    "text-xs font-bold mt-2 w-full"
+                )
             if notas:
                 ui.html(
                     f'<div class="kanban-card-notas" style="display:flex;align-items:flex-start;gap:6px;">'

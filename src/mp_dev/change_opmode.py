@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-ACCESS_TOKEN = os.getenv("MP_TEST_TOKEN")
+ACCESS_TOKEN = os.getenv("MP_PROD_TOKEN")
 
 url = "https://api.mercadopago.com/terminals/v1/setup"
 
