@@ -10,7 +10,6 @@ from models import (
 from metodos_pago import (
     MetodoPago,
     MetodoMonedas,
-    MetodoQR,
     METODOS_PAGO_DISPONIBLES,
 )
 import database_web
@@ -39,6 +38,8 @@ state = KioskoState()
 
 _admin_refresh_callbacks: list = []
 _admin_clients: dict = {}
+_kiosko_clients: dict = {}
+_kiosko_ui_ref = None
 
 
 def registrar_callback_admin(cb):
@@ -60,6 +61,33 @@ def notificar_admin():
             pass
 
 
+state.notificar_admin = notificar_admin
+
+
+def registrar_kiosko_client(client):
+    _kiosko_clients[client.id] = client
+
+
+def remover_kiosko_client(client):
+    _kiosko_clients.pop(client.id, None)
+
+
+def notificar_kiosko(mensaje: str = "", tipo: str = "positive"):
+    """Envía una notificación y refresca todos los kioskos conectados."""
+    if _kiosko_ui_ref:
+        try:
+            _kiosko_ui_ref()
+        except Exception:
+            pass
+    if mensaje:
+        for client in list(_kiosko_clients.values()):
+            try:
+                with client:
+                    ui.notify(mensaje, type=tipo, position="top")
+            except Exception:
+                pass
+
+
 # ── Hardware ──
 def on_moneda_ingresada(valor):
     if state.servicio_seleccionado and not state.exito:
@@ -74,19 +102,68 @@ database_web.init_db()
 app.add_static_files("/media", MEDIA_DIR)
 
 
-async def _recuperar_ordenes_huérfanas():
-    """Tras un apagón, busca y cancela órdenes QR que quedaron abiertas."""
+async def _recuperar_maquinas_sostenidas():
+    """Tras un apagón, verifica si hay máquinas en modo sostenido que deban apagarse.
+    Marca como completadas las órdenes cuyo tiempo máximo ya haya expirado.
+    """
     try:
-        from mp_qr import buscar_y_cancelar_ordenes_abiertas
+        ordenes = await database_web.obtener_ordenes_en_proceso_async()
+        from datetime import datetime as dt
 
-        n = await buscar_y_cancelar_ordenes_abiertas()
-        if n > 0:
-            print(f"[startup] {n} orden(es) QR huérfana(s) cancelada(s) por apagón.")
+        ahora = dt.now()
+        for orden in ordenes:
+            equipo_id = next(
+                (
+                    eid
+                    for eid, eq in hardware.EQUIPOS.items()
+                    if eq["nombre"] == orden.get("id_equipo", "")
+                ),
+                None,
+            )
+            if not equipo_id:
+                continue
+            eq = hardware.EQUIPOS[equipo_id]
+            if eq.get("modo") != "sostenido":
+                continue
+
+            # En personalizado no hay límite fijo; usamos duracion_estimada_min si existe.
+            # En autoservicio mantenemos el límite de seguridad 25/40 min.
+            es_personalizado = "personalizado" in (orden.get("modalidad") or "")
+            if es_personalizado and orden.get("duracion_estimada_min"):
+                duracion_max = orden["duracion_estimada_min"]
+            else:
+                duracion_max = 40 if eq["tipo"] == "secado" else 25
+
+            inicio_str = orden.get("inicio_servicio")
+            if inicio_str:
+                try:
+                    inicio = dt.strptime(inicio_str, "%Y-%m-%d %H:%M:%S")
+                    minutos_transcurridos = (ahora - inicio).total_seconds() / 60
+                    if minutos_transcurridos >= duracion_max:
+                        print(
+                            f"[startup] Orden {orden['id_transaccion']} en {eq['nombre']} "
+                            f"excedió {duracion_max}min tras apagón. Marcando como completada."
+                        )
+                        await database_web.marcar_completado_async(
+                            orden["id_transaccion"], orden.get("id_equipo", "")
+                        )
+                    else:
+                        # Reprogramar auto-apagado con el tiempo restante
+                        restante_min = duracion_max - minutos_transcurridos
+                        print(
+                            f"[startup] Reprogramando auto-apagado de {eq['nombre']} "
+                            f"para orden {orden['id_transaccion']} (restante: {restante_min:.1f}min)"
+                        )
+                        await hardware.reprogramar_auto_apagado(
+                            equipo_id, eq["gpio"], restante_min
+                        )
+                except Exception as e:
+                    print(f"[startup] Error parseando inicio_servicio: {e}")
     except Exception as e:
-        print(f"[startup] Error recuperando órdenes huérfanas: {e}")
+        print(f"[startup] Error recuperando máquinas sostenidas: {e}")
 
 
-app.on_startup(_recuperar_ordenes_huérfanas)
+app.on_startup(_recuperar_maquinas_sostenidas)
 
 # ──────────────────────────────────────────────
 #  CSS COMPARTIDO
@@ -651,13 +728,64 @@ def kiosko_cliente():
                     #  PASO 2 — PESAR ROPA / SELECCIÓN DE MÉTODO
                     # ══════════════════════════════
                     elif state.paso_actual == 2:
-                        if state.mostrando_metodos_pago:
+                        if state.esperando_aprobacion_admin:
+                            # ── Sub-estado: esperando aprobación del administrador ──
+                            if state.motivo_espera == "peso":
+                                titulo = "Validando peso con el operador"
+                                mensaje = (
+                                    "Por favor espera mientras el operador revisa el peso "
+                                    f"de tu ropa (<strong>{state.peso_en_revision} kg</strong>)."
+                                )
+                            elif state.metodo_pago_codigo == "mostrador":
+                                titulo = "Esperando confirmación de pago"
+                                mensaje = (
+                                    "Acércate al mostrador para realizar el pago en efectivo. "
+                                    "El operador confirmará tu pago para continuar."
+                                )
+                            else:
+                                titulo = "Procesando pago"
+                                mensaje = (
+                                    "El operador está procesando tu pago en la terminal. "
+                                    "Acerca tu tarjeta o dispositivo cuando te lo indique."
+                                )
+
+                            ui.html(f"""
+                                <div id="exito-panel" style="max-width:420px;">
+                                    <div class="exito-titulo" style="color:#93c5fd;">{titulo}</div>
+                                    <div class="exito-subtitulo" style="font-size:1rem;">{mensaje}</div>
+                                    <div class="exito-datos" style="text-align:center;margin:20px 0;">
+                                        <img src="/media/icons/gear.svg" style="width:64px;height:64px;animation:spin 2s linear infinite;opacity:0.7;" onerror="this.style.display='none'">
+                                        <style>@keyframes spin{{100%{{transform:rotate(360deg)}}}}</style>
+                                        <div style="margin-top:12px;font-size:0.85rem;color:#64748b;">No cierres esta ventana</div>
+                                    </div>
+                                </div>
+                            """)
+                            ui.button(
+                                "← Regresar",
+                                on_click=lambda: asyncio.create_task(
+                                    _kiosko_regresar_espera()
+                                ),
+                            ).classes(
+                                "btn-confirmar-nombre max-w-xs mx-auto mt-6"
+                            ).style("background:#334155;")
+                        elif state.mostrando_metodos_pago:
                             # ── Sub-estado: mostrar métodos de pago ──
                             ui.html('<p class="instruccion">¿Cómo deseas pagar?</p>')
+                            es_personalizado = (
+                                state.servicio_seleccionado
+                                and state.servicio_seleccionado.modalidad
+                                == "personalizado"
+                            )
                             with ui.element("div").style(
                                 "display:flex; gap:24px; flex-wrap:wrap; justify-content:center;"
                             ):
                                 for metodo_cls in METODOS_PAGO_DISPONIBLES:
+                                    # Los personalizados no pagan con monedas
+                                    if (
+                                        es_personalizado
+                                        and metodo_cls.codigo == "monedas"
+                                    ):
+                                        continue
                                     with (
                                         ui.element("div")
                                         .classes("card-servicio")
@@ -679,11 +807,6 @@ def kiosko_cliente():
                                         )
 
                             # Para servicios personalizados, ofrecer también la opción de pagar en mostrador
-                            es_personalizado = (
-                                state.servicio_seleccionado
-                                and state.servicio_seleccionado.modalidad
-                                == "personalizado"
-                            )
                             if es_personalizado:
                                 ui.button(
                                     "Pagar en mostrador al recibir",
@@ -694,17 +817,33 @@ def kiosko_cliente():
                                     "btn-confirmar-nombre max-w-sm mx-auto mt-4"
                                 ).style("background:#a78bfa;")
 
+                            async def _cancelar_desde_metodos_pago():
+                                await _eliminar_orden_activa_si_existe(
+                                    state.ultimo_id_transaccion
+                                )
+                                state.ultimo_id_transaccion = None
+                                state.reset()
+                                notificar_admin()
+
                             ui.button(
-                                "← Volver",
-                                on_click=lambda: (
-                                    setattr(state, "mostrando_metodos_pago", False),
-                                    kiosko_ui.refresh(),
+                                "✕ Cancelar orden",
+                                on_click=lambda: asyncio.create_task(
+                                    _cancelar_desde_metodos_pago()
                                 ),
                             ).classes(
                                 "btn-confirmar-nombre max-w-xs mx-auto mt-6"
-                            ).style("background:#334155;")
+                            ).style("background:#991b1b;color:#fecaca;")
                         else:
                             # ── Estado principal: ingreso de peso ──
+                            if state.peso_rechazado_notificado:
+                                ui.notify(
+                                    "El operador pidió volver a pesar. Ingresa el peso correcto.",
+                                    type="warning",
+                                    position="top",
+                                    timeout=8000,
+                                )
+                                state.peso_rechazado_notificado = False
+
                             state.peso_ingresado = 0.0
                             peso_buffer = {"val": "0"}
                             max_kg = state.get_limite_kg()
@@ -790,15 +929,13 @@ def kiosko_cliente():
                                             f"numpad-btn {color} text-white font-bold"
                                         )
 
-                                def ir_a_pago_desde_peso():
+                                async def enviar_peso_a_revision():
                                     if state.peso_ingresado <= 0:
                                         ui.notify(
                                             "Por favor ingresa un peso válido mayor a 0.",
                                             type="warning",
                                         )
                                         return
-                                    # BLOQUEO: si el peso excede la capacidad de la(s) máquina(s),
-                                    # no se permite continuar. Se limpia el peso y se notifica.
                                     if max_kg and state.peso_ingresado > max_kg:
                                         ui.notify(
                                             f"Retire peso de carga que no exceda los {max_kg} kg "
@@ -811,13 +948,23 @@ def kiosko_cliente():
                                         peso_buffer["val"] = "0"
                                         display_peso.set_text("0 kg")
                                         return
-                                    # Tanto personalizado como autoservicio pasan por selección de pago
-                                    state.mostrar_metodos_pago()
-                                    if _kiosko_ui_ref:
-                                        _kiosko_ui_ref()
+                                    nuevo_id = await database_web.registrar_venta_pendiente_peso_async(
+                                        servicio=state.servicio_seleccionado.nombre,
+                                        peso_kg=state.peso_ingresado,
+                                        nombre_cliente=state.nombre_cliente,
+                                        duracion=state.servicio_seleccionado.duracion_min,
+                                        modalidad=state.servicio_seleccionado.modalidad,
+                                    )
+                                    state.ultimo_id_transaccion = nuevo_id
+                                    state.peso_en_revision = state.peso_ingresado
+                                    state.marcar_esperando_admin("peso")
+                                    notificar_admin()
 
                                 ui.button(
-                                    "Continuar", on_click=ir_a_pago_desde_peso
+                                    "Continuar",
+                                    on_click=lambda: asyncio.create_task(
+                                        enviar_peso_a_revision()
+                                    ),
                                 ).classes("btn-confirmar-nombre max-w-sm mx-auto mt-4")
 
                     # ══════════════════════════════
@@ -829,6 +976,20 @@ def kiosko_cliente():
                             state.metodo_pago_codigo = "monedas"
 
                         async def _on_cancelar():
+                            async def _confirmar_cancelacion():
+                                await _eliminar_orden_activa_si_existe(
+                                    state.ultimo_id_transaccion
+                                )
+                                state.ultimo_id_transaccion = None
+                                if state.metodo_pago_instancia is not None and hasattr(
+                                    state.metodo_pago_instancia, "cancelar"
+                                ):
+                                    await state.metodo_pago_instancia.cancelar()
+                                state.reset()
+                                if _kiosko_ui_ref:
+                                    _kiosko_ui_ref()
+                                notificar_admin()
+
                             if (
                                 state.metodo_pago_codigo == "monedas"
                                 and state.dinero_ingresado > 0
@@ -850,20 +1011,15 @@ def kiosko_cliente():
                                             "Sí, cancelar",
                                             on_click=lambda: (
                                                 dialog.close(),
-                                                state.reset(),
+                                                asyncio.create_task(
+                                                    _confirmar_cancelacion()
+                                                ),
                                             ),
                                             color="red",
                                         )
                                 dialog.open()
                                 return
-                            if state.metodo_pago_instancia is not None and hasattr(
-                                state.metodo_pago_instancia, "cancelar"
-                            ):
-                                await state.metodo_pago_instancia.cancelar()
-                            # Volver al paso 0 (selección de servicio) — no solo al sub-menú
-                            state.reset()
-                            if _kiosko_ui_ref:
-                                _kiosko_ui_ref()
+                            await _confirmar_cancelacion()
 
                         async def _on_pago_exitoso():
                             await finalizar_pago()
@@ -902,7 +1058,7 @@ def kiosko_cliente():
                         )
                         ui.html(f"""
                             <div id="exito-panel">
-                                <div class="exito-icono">✅</div>
+                                <div class="exito-icono"><img src="/media/icons/check.svg" style="width:64px;height:64px;display:block;margin:0 auto;" onerror="this.style.display='none'"></div>
                                 <div class="exito-titulo">¡Orden Registrada!</div>
                                 <div class="exito-subtitulo">{subtitulo}</div>
                                 <div class="exito-datos">
@@ -933,55 +1089,92 @@ def kiosko_cliente():
                         """)
 
     state.set_callback(kiosko_ui.refresh)
-    _set_kiosko_ui_ref(kiosko_ui.refresh)
-    kiosko_ui()
-
-
-# Referencia module-level al kiosko_ui (closure) para que funciones fuera de la page puedan refrescarlo
-_kiosko_ui_ref = None
-
-
-def _set_kiosko_ui_ref(ref):
     global _kiosko_ui_ref
-    _kiosko_ui_ref = ref
+    _kiosko_ui_ref = kiosko_ui.refresh
+    # Renderizar la UI inicialmente
+    kiosko_ui()
+    # Registrar el Client del kiosko para notificaciones desde el admin
+    import nicegui as _ng
+
+    _kiosko_client = _ng.context.client
+    registrar_kiosko_client(_kiosko_client)
+    _kiosko_client.on_disconnect(lambda c=_kiosko_client: remover_kiosko_client(c))
+
+
+async def _eliminar_orden_activa_si_existe(id_transaccion):
+    """Borra una orden activa si está en un estado cancelable (peso/pago pendiente)."""
+    if not id_transaccion:
+        return
+    conn = database_web._get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM transacciones WHERE id_transaccion = ? AND estado IN ('Pendiente-peso', 'Procesando-pago', 'Pendiente-pago')",
+        (id_transaccion,),
+    )
+    conn.commit()
+    conn.close()
+
+
+async def _kiosko_regresar_espera():
+    """El cliente pulsa 'Regresar' desde la pantalla de espera admin.
+    Borra la incurrencia correspondiente y devuelve al paso anterior."""
+    if state.motivo_espera == "peso" and state.ultimo_id_transaccion:
+        await database_web.rechazar_peso_async(state.ultimo_id_transaccion, "cliente")
+        state.ultimo_id_transaccion = None
+        state.peso_ingresado = 0.0
+        state.peso_en_revision = 0.0
+        state.paso_actual = 2
+        state.mostrando_metodos_pago = False
+        state.limpiar_espera_admin()
+        notificar_admin()
+    elif state.motivo_espera == "pago" and state.ultimo_id_transaccion:
+        await database_web.cancelar_pago_pendiente_async(
+            state.ultimo_id_transaccion, "cliente"
+        )
+        # No limpiamos ultimo_id_transaccion: permite reintentar terminal/monedas
+        # (el fallback creará un nuevo registro si el anterior ya no existe)
+        state.mostrando_metodos_pago = True
+        state.limpiar_espera_admin()
+        notificar_admin()
 
 
 async def finalizar_pago():
-    """Autoservicio: registra en BD, notifica admin y espera 7s."""
+    """Registra el pago en la orden 'Pendiente' existente (peso ya aprobado).
+    Si no existe, crea un registro nuevo. Notifica admin y espera 7s."""
     metodo = state.metodo_pago_codigo or "monedas"
-    extra_ref = (
-        state.metodo_pago_instancia.orden_id
-        if state.metodo_pago_instancia is not None
-        and getattr(state.metodo_pago_instancia, "orden_id", None)
-        else ""
-    )
-    es_fallback = state.metodo_pago_instancia is not None and getattr(
-        state.metodo_pago_instancia, "fallback_estatico", False
-    )
-    modalidad = f"autoservicio-{metodo}{'-fallback' if es_fallback else ''}"
     es_pers = state.servicio_seleccionado.modalidad == "personalizado"
-    if es_pers:
-        modalidad = f"personalizado-{metodo}{'-fallback' if es_fallback else ''}"
+    modalidad = f"personalizado-{metodo}" if es_pers else f"autoservicio-{metodo}"
     print(
         f"[main] finalizar_pago: cliente={state.nombre_cliente} "
-        f"servicio={state.servicio_seleccionado.nombre} "
-        f"metodo={metodo} modalidad={modalidad} mp_orden_id={extra_ref}"
+        f"servicio={state.servicio_seleccionado.nombre} metodo={metodo} modalidad={modalidad}"
     )
-    nuevo_id = await database_web.registrar_venta_async(
-        servicio=state.servicio_seleccionado.nombre,
-        monto=state.servicio_seleccionado.precio,
-        ingresado=state.dinero_ingresado
+    ingresado = (
+        state.dinero_ingresado
         if metodo == "monedas"
-        else state.servicio_seleccionado.precio,
-        cambio=state.get_cambio() if metodo == "monedas" else 0,
-        equipo="N/A",
-        duracion=state.servicio_seleccionado.duracion_min,
-        nombre_cliente=state.nombre_cliente,
-        peso_kg=state.peso_ingresado,
-        modalidad=modalidad,
+        else state.servicio_seleccionado.precio
     )
-    if extra_ref:
-        print(f"[main] Orden MP asociada: {extra_ref}")
+    cambio = state.get_cambio() if metodo == "monedas" else 0
+    nuevo_id = await database_web.guardar_pago_orden_async(
+        state.ultimo_id_transaccion,
+        metodo,
+        state.servicio_seleccionado.precio,
+        ingresado,
+        cambio,
+        modalidad,
+    )
+    if nuevo_id is None:
+        # Fallback: crear registro nuevo si no había orden Pendiente previa
+        nuevo_id = await database_web.registrar_venta_async(
+            servicio=state.servicio_seleccionado.nombre,
+            monto=state.servicio_seleccionado.precio,
+            ingresado=ingresado,
+            cambio=cambio,
+            equipo="N/A",
+            duracion=state.servicio_seleccionado.duracion_min,
+            nombre_cliente=state.nombre_cliente,
+            peso_kg=state.peso_ingresado,
+            modalidad=modalidad,
+        )
     state.procesar_exito(nuevo_id)
     notificar_admin()
     await asyncio.sleep(7)
@@ -992,49 +1185,43 @@ async def seleccionar_metodo_pago(metodo_cls):
     """Inicializa el método de pago seleccionado y avanza al paso 3."""
     state.metodo_pago_instancia = metodo_cls(state)
     state.metodo_pago_codigo = metodo_cls.codigo
-
-    if metodo_cls.codigo == "qr":
-        resultado = await state.metodo_pago_instancia.procesar_pago()
-        if not resultado.exito:
-            print(f"[main] No se pudo crear la orden QR: {resultado.mensaje}")
-            ui.notify(
-                f"No se pudo generar el QR: {resultado.mensaje}",
-                type="negative",
-                position="top",
-                timeout=8000,
-            )
-            state.metodo_pago_instancia = None
-            state.metodo_pago_codigo = None
-            return
-
     state.paso_actual = 3
     if _kiosko_ui_ref:
         _kiosko_ui_ref()
 
 
 async def finalizar_servicio_personalizado():
-    """Personalizado: registra con precio del servicio (pagado en mostrador),
-    notifica admin y espera 7s. Si el cliente ya pagó en el kiosko, el método
-    de pago registra el monto correspondiente y se marca con modalidad=autoservicio-*."""
+    """Personalizado: el cliente elige pagar en efectivo en mostrador.
+    La orden pasa a 'Pendiente-pago' a espera de que el operador confirme
+    el pago recibido."""
     print(
         f"[main] finalizar_servicio_personalizado: cliente={state.nombre_cliente} "
-        f"servicio={state.servicio_seleccionado.nombre} pendiente_pago_en_mostrador"
+        f"servicio={state.servicio_seleccionado.nombre} esperando_pago_mostrador"
     )
-    nuevo_id = await database_web.registrar_venta_async(
-        servicio=state.servicio_seleccionado.nombre,
-        monto=state.servicio_seleccionado.precio,
-        ingresado=0,
-        cambio=0,
-        equipo="N/A",
-        duracion=state.servicio_seleccionado.duracion_min,
-        nombre_cliente=state.nombre_cliente,
-        peso_kg=state.peso_ingresado,
+    if state.ultimo_id_transaccion is None:
+        ui.notify(
+            "No hay una orden activa. Vuelve a ingresar el peso.", type="negative"
+        )
+        return
+    id_orden = await database_web.marcar_pendiente_pago_async(
+        state.ultimo_id_transaccion,
+        state.servicio_seleccionado.precio,
         modalidad="personalizado-pendiente-pago",
     )
-    state.procesar_exito(nuevo_id)
-    notificar_admin()
-    await asyncio.sleep(7)
-    state.reset()
+    if id_orden is None:
+        # Fallback: crear registro nuevo si no se pudo actualizar
+        id_orden = await database_web.registrar_venta_pendiente_terminal_async(
+            servicio=state.servicio_seleccionado.nombre,
+            peso_kg=state.peso_ingresado,
+            monto=state.servicio_seleccionado.precio,
+            nombre_cliente=state.nombre_cliente,
+            duracion=state.servicio_seleccionado.duracion_min,
+            modalidad="personalizado-pendiente-pago",
+        )
+    state.ultimo_id_transaccion = id_orden
+    state.metodo_pago_codigo = "mostrador"
+    state.marcar_esperando_admin("pago")
+    state.notificar_admin()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1074,69 +1261,6 @@ def admin_login():
             ui.button("Ingresar", on_click=intentar_login).props(
                 "color=primary"
             ).classes("w-full text-lg font-bold py-3")
-
-
-# ── Diálogo de confirmación de pago QR (admin) ────────────────────────────────
-def abrir_dialogo_confirmar_qr(id_transaccion, refresh_callback):
-    """Abre un diálogo que pide la contraseña del admin para confirmar
-    que un pago QR fue recibido. Si la contraseña es correcta, marca la
-    orden como pagada (estado 'Pendiente' + nota de auditoría)."""
-    PASSWORD = os.getenv("BYPASS_PASSWORD", "admin123")
-
-    with ui.dialog() as dialog, ui.card().style("min-width:380px;"):
-        ui.html(
-            '<div style="font-size:1.2rem;font-weight:800;color:#92400e;margin-bottom:6px;">'
-            "⚠️ Confirmar pago QR"
-            "</div>"
-        )
-        ui.html(
-            f'<div style="font-size:0.88rem;color:#64748b;margin-bottom:14px;">'
-            f"Vas a confirmar el pago de la orden <b>#{id_transaccion}</b>.<br>"
-            "Verifica que el cliente haya pagado antes de continuar."
-            "</div>"
-        )
-        pwd_input = (
-            ui.input("Contraseña", password=True)
-            .props("outlined dense")
-            .classes("w-full mb-3")
-        )
-        error_label = ui.html("")
-
-        async def do_confirm():
-            if pwd_input.value == PASSWORD:
-                ok = await database_web.confirmar_pago_qr_async(
-                    id_transaccion, usuario_actual()
-                )
-                if ok:
-                    ui.notify(
-                        f"Pago de orden #{id_transaccion} confirmado.",
-                        type="positive",
-                    )
-                    dialog.close()
-                    if refresh_callback is not None:
-                        try:
-                            res = refresh_callback()
-                            if asyncio.iscoroutine(res):
-                                asyncio.create_task(res)
-                        except Exception:
-                            pass
-                else:
-                    error_label.set_content(
-                        '<div style="color:#ef4444;font-size:0.85rem;margin-bottom:6px;">'
-                        "La orden ya estaba confirmada o no existe."
-                        "</div>"
-                    )
-            else:
-                error_label.set_content(
-                    '<div style="color:#ef4444;font-size:0.85rem;margin-bottom:6px;">'
-                    "Contraseña incorrecta."
-                    "</div>"
-                )
-
-        with ui.row().classes("w-full justify-end gap-2 mt-2"):
-            ui.button("Cancelar", on_click=dialog.close).props("outline")
-            ui.button("Confirmar pago", on_click=do_confirm).props("color=warning")
-    dialog.open()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -1318,46 +1442,70 @@ async def admin_autoservicio():
     async def vista_ordenes():
         with ui.element("div").props("id=admin-content").style("width:100%;"):
             ventas = await database_web.obtener_ventas_activas_async()
+            esperando_peso = [v for v in ventas if v["estado"] == "Pendiente-peso"]
+            procesando_pago = [
+                v
+                for v in ventas
+                if v["estado"] in ("Procesando-pago", "Pendiente-pago")
+            ]
             pendientes = [v for v in ventas if v["estado"] == "Pendiente"]
             en_proceso = [v for v in ventas if v["estado"] == "En proceso"]
 
-            # ─ Pendientes ─
-            ui.html(
-                f"""
-                <div class="seccion-header">
-                    <img src="/media/icons/circle-yellow.svg" style="width:18px;height:18px;vertical-align:middle;margin-right:6px;">
-                    Órdenes Pendientes
-                    <span class="badge badge-pendiente">{len(pendientes)}</span>
-                </div>
-            """
-            )
-            if not pendientes:
+            def _render_seccion(icon, titulo, badge_cls, items, render_fn):
                 ui.html(
-                    '<div class="empty-state">'
-                    '<img src="/media/icons/box.svg" style="width:48px;height:48px;opacity:0.5;">'
-                    "<p>No hay órdenes pendientes</p></div>"
+                    f"""
+                    <div class="seccion-header">
+                        <img src="/media/icons/{icon}.svg" style="width:18px;height:18px;vertical-align:middle;margin-right:6px;">
+                        {titulo}
+                        <span class="badge {badge_cls}">{len(items)}</span>
+                    </div>
+                """
                 )
-            else:
-                for v in pendientes:
-                    _render_auto_pendiente(v, en_proceso)
+                if not items:
+                    ui.html(
+                        '<div class="empty-state">'
+                        '<img src="/media/icons/sleep.svg" style="width:48px;height:48px;opacity:0.5;">'
+                        f"<p>Sin órdenes en esta sección</p></div>"
+                    )
+                else:
+                    for v in items:
+                        render_fn(v)
+
+            # ─ Esperando validación de peso ─
+            _render_seccion(
+                "scale",
+                "Esperando validación de peso",
+                "badge-pendiente",
+                esperando_peso,
+                _render_esperando_peso,
+            )
+
+            # ─ Procesando pago (monedas en kiosko / terminal) ─
+            _render_seccion(
+                "ticket",
+                "Procesando pago",
+                "badge-en-proceso",
+                procesando_pago,
+                _render_procesando_pago,
+            )
+
+            # ─ Pendientes ─
+            _render_seccion(
+                "circle-yellow",
+                "Órdenes Pendientes",
+                "badge-pendiente",
+                pendientes,
+                lambda v: _render_auto_pendiente(v, en_proceso),
+            )
 
             # ─ En Proceso ─
-            ui.html(f"""
-                <div class="seccion-header" style="margin-top:30px;">
-                    <img src="/media/icons/circle-orange.svg" style="width:18px;height:18px;vertical-align:middle;margin-right:6px;">
-                    En Proceso
-                    <span class="badge badge-en-proceso">{len(en_proceso)}</span>
-                </div>
-            """)
-            if not en_proceso:
-                ui.html(
-                    '<div class="empty-state">'
-                    '<img src="/media/icons/sleep.svg" style="width:48px;height:48px;opacity:0.5;">'
-                    "<p>Ninguna máquina en uso</p></div>"
-                )
-            else:
-                for v in en_proceso:
-                    _render_auto_en_proceso(v, vista_ordenes)
+            _render_seccion(
+                "circle-orange",
+                "En Proceso",
+                "badge-en-proceso",
+                en_proceso,
+                lambda v: _render_auto_en_proceso(v, vista_ordenes),
+            )
 
     def _badge_servicio(tipo):
         cls = (
@@ -1370,28 +1518,114 @@ async def admin_autoservicio():
         if not modalidad:
             return ""
         m = modalidad
-        if "qr-fallback" in m or "qr" in m and "fallback" in m:
-            color_bg, color_fg = "#fef3c7", "#92400e"
-            label = "⚠️ QR (verificar)"
-        elif "qr" in m:
-            color_bg, color_fg = "#dbeafe", "#1d4ed8"
-            label = "QR"
-        elif "terminal" in m or "point" in m:
+        if "terminal" in m:
             color_bg, color_fg = "#fce7f3", "#be185d"
-            label = "Point"
+            label = "Terminal"
         elif "monedas" in m:
             color_bg, color_fg = "#d1fae5", "#065f46"
             label = "Efectivo"
+        elif "pendiente-pago" in m or "mostrador" in m:
+            color_bg, color_fg = "#dcfce7", "#166534"
+            label = "Efectivo mostrador"
         else:
-            return ""
+            color_bg, color_fg = "#e2e8f0", "#475569"
+            label = "Otro"
         return f'<span class="orden-servicio-badge" style="background:{color_bg};color:{color_fg};">{label}</span>'
+
+    def _render_esperando_peso(v):
+        nombre = v.get("nombre_cliente") or "Sin nombre"
+        peso = v.get("peso_kg", 0) or 0
+        with (
+            ui.element("div")
+            .classes("orden-card")
+            .style("border-left:4px solid #a855f7;")
+        ):
+            with ui.element("div").style("flex:1;min-width:0;"):
+                ui.html(
+                    f'<div class="orden-numero">Orden #{v["id_transaccion"]}</div>'
+                    f"{_badge_servicio(v['tipo_servicio'])} "
+                    f'<span class="orden-servicio-badge" style="background:#f3e8ff;color:#7e22ce;">Validar peso</span>'
+                )
+                ui.html(f'<div class="orden-nombre">{nombre}</div>')
+                ui.html(
+                    f'<div class="orden-meta">{v["fecha_hora"]} · Peso registrado: <strong>{peso} kg</strong></div>'
+                )
+            with ui.element("div").style(
+                "flex-shrink:0;display:flex;flex-direction:column;gap:8px;align-items:flex-end;"
+            ):
+                ui.label("✓ Aprobar").classes("btn-maquina btn-iniciar").on(
+                    "click",
+                    lambda e, venta=v: asyncio.create_task(
+                        aprobar_peso(venta, vista_ordenes)
+                    ),
+                )
+                ui.label("✕ Rechazar").classes("btn-maquina btn-pausar").on(
+                    "click",
+                    lambda e, venta=v: asyncio.create_task(
+                        rechazar_peso(venta, vista_ordenes)
+                    ),
+                )
+
+    def _render_procesando_pago(v):
+        nombre = v.get("nombre_cliente") or "Sin nombre"
+        peso = v.get("peso_kg", 0) or 0
+        monto = v.get("monto_pagado", 0) or 0
+        modalidad = v.get("modalidad", "")
+        es_pago_pendiente = v["estado"] == "Pendiente-pago"
+        if "pendiente-pago" in modalidad or "mostrador" in modalidad:
+            label = "Efectivo mostrador"
+            color = "#16a34a"
+        elif "terminal" in modalidad:
+            label = "Terminal"
+            color = "#f59e0b"
+        else:
+            label = "En pago"
+            color = "#3b82f6"
+        folio_input = None
+        with (
+            ui.element("div")
+            .classes("orden-card")
+            .style(f"border-left:4px solid {color};")
+        ):
+            with ui.element("div").style("flex:1;min-width:0;"):
+                ui.html(
+                    f'<div class="orden-numero">Orden #{v["id_transaccion"]}</div>'
+                    f"{_badge_servicio(v['tipo_servicio'])} "
+                    f'<span class="orden-servicio-badge" style="background:{color}22;color:{color};">{label}</span> '
+                    f"{_badge_metodo_pago(modalidad)}"
+                )
+                ui.html(f'<div class="orden-nombre">{nombre}</div>')
+                ui.html(
+                    f'<div class="orden-meta">{v["fecha_hora"]} · {peso} kg · Monto: <strong>${monto}</strong></div>'
+                )
+                if es_pago_pendiente:
+                    folio_input = (
+                        ui.input("Folio de transacción (opcional)")
+                        .props("outlined dense")
+                        .classes("mb-2")
+                    )
+                    folio_input
+            with ui.element("div").style(
+                "flex-shrink:0;display:flex;flex-direction:column;gap:8px;align-items:flex-end;"
+            ):
+                if es_pago_pendiente:
+                    ui.label("✓ Confirmar pago").classes("btn-maquina btn-iniciar").on(
+                        "click",
+                        lambda e, venta=v, inp=folio_input: asyncio.create_task(
+                            confirmar_folio(venta, inp, vista_ordenes)
+                        ),
+                    )
+                    ui.label("✕ Cancelar").classes("btn-maquina btn-pausar").on(
+                        "click",
+                        lambda e, venta=v: asyncio.create_task(
+                            cancelar_pago_pendiente(venta, vista_ordenes)
+                        ),
+                    )
 
     def _render_auto_pendiente(v, en_proceso):
         nombre = v.get("nombre_cliente") or "Sin nombre"
         peso = v.get("peso_kg", 0) or 0
         modalidad = v.get("modalidad", "")
-        notas = v.get("notas") or ""
-        qr_pendiente = "qr" in modalidad and "PAGO CONFIRMADO" not in notas
         with ui.element("div").classes("orden-card"):
             with ui.element("div").style("flex:1;min-width:0;"):
                 ui.html(
@@ -1404,13 +1638,6 @@ async def admin_autoservicio():
                     f'<div class="orden-meta">{v["fecha_hora"]} · {peso} kg · Pagado: <strong>${v["monto_pagado"]}</strong></div>'
                 )
             with ui.element("div").style("flex-shrink:0;"):
-                if qr_pendiente:
-                    ui.button(
-                        "Confirmar pago QR",
-                        on_click=lambda vid=v["id_transaccion"]: (
-                            abrir_dialogo_confirmar_qr(vid, vista_ordenes)
-                        ),
-                    ).props("color=warning size=sm").classes("font-bold mb-2")
                 ui.html('<div class="maquina-label">Asignar a:</div>')
                 with ui.element("div").classes("maquinas-row"):
                     for equipo_id, equipo in hardware.EQUIPOS.items():
@@ -1483,6 +1710,26 @@ async def admin_autoservicio():
             except Exception:
                 pass
 
+        # Detectar si la máquina asignada es de modo sostenido y está activa
+        equipo_id = next(
+            (
+                eid
+                for eid, eq in hardware.EQUIPOS.items()
+                if eq["nombre"] == v.get("id_equipo", "")
+            ),
+            None,
+        )
+        es_sostenido = (
+            equipo_id and hardware.EQUIPOS.get(equipo_id, {}).get("modo") == "sostenido"
+        )
+        seg_restantes = (
+            hardware.tiempo_restante_sostenido(equipo_id) if es_sostenido else 0
+        )
+        timer_txt = ""
+        if es_sostenido and seg_restantes > 0:
+            m, s = divmod(seg_restantes, 60)
+            timer_txt = f" · ⏳ {m:02d}:{s:02d}"
+
         modalidad = v.get("modalidad", "")
         with ui.element("div").classes("orden-card en-proceso"):
             with ui.element("div").style("flex:1;min-width:0;"):
@@ -1495,23 +1742,100 @@ async def admin_autoservicio():
                 )
                 ui.html(f'<div class="orden-nombre">{nombre}</div>')
                 ui.html(
-                    f'<div class="orden-meta">{v["fecha_hora"]}{minutos_txt} · Pagado: <strong>${v["monto_pagado"]}</strong></div>'
+                    f'<div class="orden-meta">{v["fecha_hora"]}{minutos_txt}{timer_txt} · Pagado: <strong>${v["monto_pagado"]}</strong></div>'
                 )
             with ui.element("div").style(
                 "flex-shrink:0;display:flex;flex-direction:column;gap:8px;align-items:flex-end;"
             ):
-                ui.label("✅ Finalizar").classes("btn-maquina btn-finalizar").on(
-                    "click",
-                    lambda e, venta=v: asyncio.create_task(
-                        finalizar_orden(venta, ref_ordenes)
-                    ),
-                )
+                if es_sostenido:
+                    ui.label("⏹ Detener").classes("btn-maquina btn-pausar").on(
+                        "click",
+                        lambda e, venta=v, eid=equipo_id: asyncio.create_task(
+                            detener_maquina_sostenida(venta, eid, ref_ordenes)
+                        ),
+                    )
+                else:
+                    ui.label("✅ Finalizar").classes("btn-maquina btn-finalizar").on(
+                        "click",
+                        lambda e, venta=v: asyncio.create_task(
+                            finalizar_orden(venta, ref_ordenes)
+                        ),
+                    )
                 ui.label("⏸ Cancelar").classes("btn-maquina btn-pausar").on(
                     "click",
                     lambda e, venta=v: asyncio.create_task(
                         cancelar_orden(venta, ref_ordenes)
                     ),
                 )
+
+    async def aprobar_peso(venta, ref):
+        await database_web.aprobar_peso_async(
+            venta["id_transaccion"], venta.get("peso_kg", 0), usuario_actual()
+        )
+        state.peso_ingresado = venta.get("peso_kg", 0)
+        state.mostrando_metodos_pago = True
+        state.limpiar_espera_admin()
+        with page_client:
+            ui.notify(
+                f"✓ Peso aprobado — {venta.get('nombre_cliente', 'Orden')} #{venta['id_transaccion']}",
+                type="positive",
+                position="top",
+            )
+        await ref.refresh()
+        notificar_kiosko("Peso aprobado. Selecciona tu método de pago.", "positive")
+
+    async def rechazar_peso(venta, ref):
+        await database_web.rechazar_peso_async(
+            venta["id_transaccion"], usuario_actual()
+        )
+        state.peso_ingresado = 0.0
+        state.peso_en_revision = 0.0
+        state.peso_rechazado_notificado = True
+        state.paso_actual = 2
+        state.mostrando_metodos_pago = False
+        state.limpiar_espera_admin()
+        with page_client:
+            ui.notify(
+                f"↩ Peso rechazado — {venta.get('nombre_cliente', 'Orden')} #{venta['id_transaccion']}",
+                type="warning",
+                position="top",
+            )
+        await ref.refresh()
+        notificar_kiosko("El administrador pidió volver a pesar.", "warning")
+
+    async def confirmar_folio(venta, folio_input, ref):
+        folio = folio_input.value.strip()
+        await database_web.aprobar_pago_terminal_async(
+            venta["id_transaccion"], folio, usuario_actual()
+        )
+        state.limpiar_espera_admin()
+        state.procesar_exito(venta["id_transaccion"])
+        notificar_admin()
+        with page_client:
+            ui.notify(
+                f"✓ Pago confirmado — Orden #{venta['id_transaccion']}",
+                type="positive",
+                position="top",
+            )
+        await ref.refresh()
+        notificar_kiosko("Pago confirmado. Gracias por tu compra.", "positive")
+        await asyncio.sleep(7)
+        state.reset()
+
+    async def cancelar_pago_pendiente(venta, ref):
+        await database_web.cancelar_pago_pendiente_async(
+            venta["id_transaccion"], usuario_actual()
+        )
+        state.mostrando_metodos_pago = True
+        state.limpiar_espera_admin()
+        with page_client:
+            ui.notify(
+                f"✕ Pago cancelado — Orden #{venta['id_transaccion']}",
+                type="warning",
+                position="top",
+            )
+        await ref.refresh()
+        notificar_kiosko("El pago fue cancelado. Puedes intentar de nuevo.", "warning")
 
     async def iniciar_maquina(venta, nombre_maquina, equipo_id, ref):
         await hardware.activar_lavadora(equipo_id)
@@ -1526,7 +1850,32 @@ async def admin_autoservicio():
             )
         await ref.refresh()
 
+    async def detener_maquina_sostenida(venta, equipo_id, ref):
+        await hardware.apagar_maquina(equipo_id)
+        await database_web.marcar_completado_async(
+            venta["id_transaccion"], venta["id_equipo"]
+        )
+        with page_client:
+            ui.notify(
+                f"⏹ {venta.get('id_equipo')} detenida — Orden #{venta['id_transaccion']}",
+                type="warning",
+                position="top",
+            )
+        await ref.refresh()
+
     async def finalizar_orden(venta, ref):
+        # Apagar máquina si está en modo sostenido
+        equipo_id = next(
+            (
+                eid
+                for eid, eq in hardware.EQUIPOS.items()
+                if eq["nombre"] == venta.get("id_equipo", "")
+            ),
+            None,
+        )
+        if equipo_id and hardware.EQUIPOS[equipo_id].get("modo") == "sostenido":
+            await hardware.apagar_maquina(equipo_id)
+
         await database_web.marcar_completado_async(
             venta["id_transaccion"], venta["id_equipo"]
         )
@@ -1548,7 +1897,13 @@ async def admin_autoservicio():
             None,
         )
         if equipo_id:
-            await hardware.activar_lavadora(equipo_id)
+            eq = hardware.EQUIPOS[equipo_id]
+            if eq.get("modo") == "sostenido":
+                # En modo sostenido, cancelar = apagar la máquina
+                await hardware.apagar_maquina(equipo_id)
+            else:
+                # En modo pulso, mantener comportamiento anterior (pulso)
+                await hardware.activar_lavadora(equipo_id)
         await database_web.marcar_completado_async(
             venta["id_transaccion"], venta["id_equipo"]
         )
@@ -1674,8 +2029,6 @@ async def admin_personalizado():
         peso = orden.get("peso_kg", 0) or 0
         notas = orden.get("notas") or ""
         servicio = orden.get("tipo_servicio", "")
-        modalidad = orden.get("modalidad", "")
-        qr_pendiente = "qr" in modalidad and "PAGO CONFIRMADO" not in notas
 
         with ui.element("div").classes("kanban-card"):
             ui.html(f'<div class="kanban-card-nombre">{nombre}</div>')
@@ -1683,21 +2036,40 @@ async def admin_personalizado():
                 f'<div class="kanban-card-meta">#{orden["id_transaccion"]} · {servicio} · {peso} kg</div>'
             )
             ui.html(f'<div class="kanban-card-meta">{orden["fecha_hora"]}</div>')
-            if qr_pendiente:
-                ui.button(
-                    "Confirmar pago QR",
-                    on_click=lambda vid=orden["id_transaccion"]: (
-                        abrir_dialogo_confirmar_qr(vid, ref)
-                    ),
-                ).props("color=warning size=sm").classes(
-                    "text-xs font-bold mt-2 w-full"
-                )
             if notas:
                 ui.html(
                     f'<div class="kanban-card-notas" style="display:flex;align-items:flex-start;gap:6px;">'
                     f'<img src="/media/icons/notes.svg" style="width:14px;height:14px;margin-top:2px;">'
                     f"<span>{notas}</span></div>"
                 )
+
+            # Timer para máquinas sostenidas en etapa "En Proceso"
+            if etapa_actual == "En Proceso" and orden.get("id_equipo"):
+                equipo_id = next(
+                    (
+                        eid
+                        for eid, eq in hardware.EQUIPOS.items()
+                        if eq["nombre"] == orden["id_equipo"]
+                    ),
+                    None,
+                )
+                if (
+                    equipo_id
+                    and hardware.EQUIPOS.get(equipo_id, {}).get("modo") == "sostenido"
+                ):
+                    seg_restantes = hardware.tiempo_restante_sostenido(equipo_id)
+                    if seg_restantes > 0:
+                        m, s = divmod(seg_restantes, 60)
+                        ui.html(
+                            f'<div style="font-size:0.8rem;color:#f59e0b;font-weight:700;margin-top:4px;display:flex;align-items:center;gap:4px;">'
+                            f'<img src="/media/icons/gear.svg" style="width:14px;height:14px;">'
+                            f"⏳ {m:02d}:{s:02d} restantes</div>"
+                        )
+                    else:
+                        ui.html(
+                            f'<div style="font-size:0.8rem;color:#ef4444;font-weight:700;margin-top:4px;">'
+                            f"Tiempo expirado — finalice la orden</div>"
+                        )
 
             # Acciones
             with ui.row().classes("gap-1 mt-2 flex-wrap"):
@@ -1711,58 +2083,159 @@ async def admin_personalizado():
                 if idx_actual < len(ETAPAS_KANBAN) - 1:
                     siguiente = ETAPAS_KANBAN[idx_actual + 1]
 
-                    # Si se avanza a "En Proceso", pedir máquina
+                    # Si se avanza a "En Proceso", ofrecer asignación opcional de máquina
                     if siguiente == "En Proceso":
 
-                        async def abrir_asignar_maquina(o=orden, ref=ref):
-                            equipo_disponibles = {
-                                eid: eq
-                                for eid, eq in hardware.EQUIPOS.items()
-                                if (o.get("peso_kg") or 0) <= eq["capacidad_kg"]
-                            }
+                        async def abrir_iniciar_personalizado(o=orden, ref=ref):
+                            peso = o.get("peso_kg") or 0
+                            # En personalizado no hay límite de duración; usamos la del servicio
+                            duracion_default = o.get("duracion_estimada_min") or 60
+
                             with page_client_p:
                                 with (
-                                    ui.dialog() as d_asignar,
-                                    ui.card().style("min-width:320px;"),
+                                    ui.dialog() as d,
+                                    ui.card().style("min-width:420px;"),
                                 ):
-                                    ui.label("Asignar máquina").classes(
-                                        "text-lg font-bold mb-2"
-                                    )
-                                    opts = {
-                                        eq["nombre"]: eid
-                                        for eid, eq in equipo_disponibles.items()
-                                    }
-                                    sel_eq = ui.select(
-                                        list(opts.keys()), label="Máquina"
-                                    ).classes("w-full")
-                                    with ui.row().classes("w-full justify-end mt-3"):
-                                        ui.button(
-                                            "Cancelar", on_click=d_asignar.close
-                                        ).props("flat")
+                                    ui.label(
+                                        f"Iniciar — {o.get('nombre_cliente')} #{o['id_transaccion']}"
+                                    ).classes("text-lg font-bold mb-2")
 
-                                        async def confirmar_asignar():
-                                            eid = opts.get(sel_eq.value)
-                                            await hardware.activar_lavadora(eid)
+                                    # Opción A: sin máquina (equipo externo)
+                                    async def iniciar_sin_maquina():
+                                        await (
+                                            database_web.actualizar_etapa_kanban_async(
+                                                o["id_transaccion"], "En Proceso"
+                                            )
+                                        )
+                                        d.close()
+                                        await ref.refresh()
+                                        with page_client_p:
+                                            ui.notify(
+                                                "Orden iniciada sin máquina del sistema",
+                                                type="info",
+                                            )
+
+                                    ui.button(
+                                        "Iniciar sin máquina (equipo externo)",
+                                        on_click=iniciar_sin_maquina,
+                                    ).props("flat color=grey").classes("w-full mb-2")
+
+                                    ui.html(
+                                        '<div style="border-top:1px solid #e2e8f0;margin:8px 0;"></div>'
+                                    )
+
+                                    # Opción B: con máquina del sistema
+                                    ui.label("O asignar máquina del sistema:").classes(
+                                        "font-semibold mb-1"
+                                    )
+
+                                    maquinas_ok = {
+                                        eid: eq
+                                        for eid, eq in hardware.EQUIPOS.items()
+                                        if peso <= eq["capacidad_kg"]
+                                    }
+
+                                    if not maquinas_ok:
+                                        ui.html(
+                                            '<div style="color:#ef4444;">Ninguna máquina tiene capacidad para este peso.</div>'
+                                        )
+                                    else:
+                                        opts_texto = {
+                                            f"{eq['nombre']} ({eq['modo']}, máx {eq['capacidad_kg']}kg)": eid
+                                            for eid, eq in maquinas_ok.items()
+                                        }
+                                        sel_maq = ui.select(
+                                            list(opts_texto.keys()), label="Máquina"
+                                        ).classes("w-full")
+
+                                        sel_tiempo = ui.number(
+                                            "Duración (min)",
+                                            value=duracion_default,
+                                            min=1,
+                                            step=1,
+                                        ).classes("w-full mt-2")
+
+                                        async def iniciar_con_maquina():
+                                            eid = opts_texto.get(sel_maq.value)
+                                            if not eid:
+                                                ui.notify(
+                                                    "Selecciona una máquina",
+                                                    type="warning",
+                                                )
+                                                return
+                                            eq = hardware.EQUIPOS[eid]
+                                            duracion = int(
+                                                sel_tiempo.value or duracion_default
+                                            )
+                                            if duracion < 1:
+                                                ui.notify(
+                                                    "La duración debe ser mayor a 0",
+                                                    type="warning",
+                                                )
+                                                return
+
+                                            if hardware.equipo_sostenido_activo(eid):
+                                                ui.notify(
+                                                    f"{eq['nombre']} ya está en uso.",
+                                                    type="warning",
+                                                )
+                                                return
+
+                                            if eq.get("modo") == "sostenido":
+                                                await hardware.activar_lavadora_con_duracion(
+                                                    eid, duracion
+                                                )
+                                            else:
+                                                await hardware.activar_lavadora(eid)
+
                                             await database_web.actualizar_etapa_kanban_async(
                                                 o["id_transaccion"],
                                                 "En Proceso",
-                                                equipo_id=sel_eq.value,
+                                                equipo_id=eq["nombre"],
                                             )
-                                            with page_client_p:
-                                                d_asignar.close()
+                                            d.close()
                                             await ref.refresh()
+                                            with page_client_p:
+                                                ui.notify(
+                                                    f"▶ {eq['nombre']} iniciada por {duracion}min",
+                                                    type="positive",
+                                                )
 
-                                        ui.button(
-                                            "Iniciar", on_click=confirmar_asignar
-                                        ).props("color=green")
-                                    d_asignar.open()
+                                        with ui.row().classes(
+                                            "w-full justify-end mt-3"
+                                        ):
+                                            ui.button(
+                                                "Cancelar", on_click=d.close
+                                            ).props("flat")
+                                            ui.button(
+                                                "Iniciar con máquina",
+                                                on_click=iniciar_con_maquina,
+                                            ).props("color=green")
+                            d.open()
 
                         ui.button(
-                            f"→ {siguiente}", on_click=abrir_asignar_maquina
+                            f"→ {siguiente}", on_click=abrir_iniciar_personalizado
                         ).props("size=xs color=primary outline").classes("text-xs")
                     else:
 
                         async def avanzar(o=orden, sig=siguiente, ref=ref):
+                            # Si salimos de "En Proceso" y hay máquina asignada,
+                            # apagarla si es modo sostenido
+                            if etapa_actual == "En Proceso" and o.get("id_equipo"):
+                                equipo_id = next(
+                                    (
+                                        eid
+                                        for eid, eq in hardware.EQUIPOS.items()
+                                        if eq["nombre"] == o["id_equipo"]
+                                    ),
+                                    None,
+                                )
+                                if (
+                                    equipo_id
+                                    and hardware.EQUIPOS.get(equipo_id, {}).get("modo")
+                                    == "sostenido"
+                                ):
+                                    await hardware.apagar_maquina(equipo_id)
                             await database_web.actualizar_etapa_kanban_async(
                                 o["id_transaccion"], sig
                             )

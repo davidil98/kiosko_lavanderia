@@ -5,4 +5,4 @@ ecoluna_datos.db
 .DS_Store
 *.code-workspace
 agent_notation
-src/mp_dev/mcp_mp.json
+AGENTS.md

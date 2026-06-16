@@ -86,8 +86,8 @@ detect_displays() {
 # Si no están definidas, intentar detectar; si falla, usar defaults
 if [ -z "$CLIENT_DISPLAY" ] || [ -z "$ADMIN_DISPLAY" ]; then
     detect_displays || {
-        CLIENT_DISPLAY="0,0,1024,768"
-        ADMIN_DISPLAY="1024,0,1024,768"
+        CLIENT_DISPLAY="0,0,900,1024"
+        ADMIN_DISPLAY="1024,0,1440,900"
         echo "[INFO] Usando configuración por defecto:"
         echo "       Cliente: $CLIENT_DISPLAY"
         echo "       Admin:   $ADMIN_DISPLAY"
@@ -202,7 +202,7 @@ echo ""
 echo "Si las ventanas no aparecen en la pantalla correcta, crea el archivo:"
 echo "  $ENV_FILE"
 echo "con el contenido:"
-echo "  CLIENT_DISPLAY=0,0,1024,768"
-echo "  ADMIN_DISPLAY=1024,0,1024,768"
+echo "  CLIENT_DISPLAY=0,0,900,1024"
+echo "  ADMIN_DISPLAY=1024,0,1440,900"
 echo ""
 echo "Ajusta los valores según la resolución y posición de tus monitores."

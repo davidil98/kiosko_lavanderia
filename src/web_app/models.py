@@ -104,11 +104,17 @@ class KioskoState:
         self.mostrando_metodos_pago: bool = (
             False  # True cuando se muestran opciones de método de pago
         )
-        self.metodo_pago_codigo: Optional[str] = None  # 'monedas' | 'qr' | 'terminal'
+        self.metodo_pago_codigo: Optional[str] = None  # 'monedas' | 'terminal'
         self.metodo_pago_instancia: Optional[object] = (
             None  # Instancia activa de MetodoPago
         )
+        # Nuevos estados para aprobación del administrador
+        self.esperando_aprobacion_admin: bool = False
+        self.motivo_espera: str = ""  # 'peso' | 'pago'
+        self.peso_en_revision: float = 0.0
+        self.peso_rechazado_notificado: bool = False
         self.callback_on_change = None
+        self.notificar_admin = lambda: None  # Callback set from main.py
 
     def set_callback(self, callback):
         self.callback_on_change = callback
@@ -138,6 +144,18 @@ class KioskoState:
     def mostrar_metodos_pago(self):
         """Muestra el sub-menú de selección de método de pago (paso 2)."""
         self.mostrando_metodos_pago = True
+        self._trigger_change()
+
+    def marcar_esperando_admin(self, motivo: str):
+        """Activa el overlay de espera de aprobación del administrador."""
+        self.esperando_aprobacion_admin = True
+        self.motivo_espera = motivo
+        self._trigger_change()
+
+    def limpiar_espera_admin(self):
+        """Desactiva el overlay de espera."""
+        self.esperando_aprobacion_admin = False
+        self.motivo_espera = ""
         self._trigger_change()
 
     def confirmar_nombre(self, nombre: str):
@@ -196,4 +214,8 @@ class KioskoState:
         self.mostrando_metodos_pago = False
         self.metodo_pago_codigo = None
         self.metodo_pago_instancia = None
+        self.esperando_aprobacion_admin = False
+        self.motivo_espera = ""
+        self.peso_en_revision = 0.0
+        self.peso_rechazado_notificado = False
         self._trigger_change()

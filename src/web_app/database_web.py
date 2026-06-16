@@ -49,6 +49,8 @@ def init_db():
         ("notas", "TEXT    DEFAULT ''"),
         ("etapa_kanban", "TEXT    DEFAULT NULL"),
         ("modalidad", "TEXT    DEFAULT 'autoservicio'"),
+        ("numero_transaccion_terminal", "TEXT    DEFAULT ''"),
+        ("validado_por", "TEXT    DEFAULT ''"),
     ]
     cursor.execute("PRAGMA table_info(transacciones)")
     cols_existentes = {row[1] for row in cursor.fetchall()}
@@ -150,18 +152,46 @@ async def registrar_venta_async(
 
 
 def _obtener_ventas_activas():
-    """Órdenes de autoservicio Pendientes y En proceso (cualquier método de pago)."""
+    """Órdenes de autoservicio en cualquier estado pendiente/administrativo y En proceso.
+    También incluye órdenes personalizadas que estén 'En proceso' y tengan una
+    máquina del sistema asignada, para que aparezcan como ocupadas en el panel
+    de autoservicio."""
     conn = _get_connection()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT * FROM transacciones "
-        "WHERE estado IN ('Pendiente', 'En proceso') "
-        "AND (modalidad IS NULL OR modalidad LIKE 'autoservicio%') "
+        "WHERE ("
+        "  estado IN ('Pendiente-peso', 'Procesando-pago', 'Pendiente-pago') "
+        "  AND (modalidad IS NULL OR modalidad LIKE 'autoservicio%' OR modalidad LIKE 'personalizado%')"
+        ") OR ("
+        "  estado IN ('Pendiente', 'En proceso') "
+        "  AND (modalidad IS NULL OR modalidad LIKE 'autoservicio%')"
+        ") OR ("
+        "  estado = 'En proceso' "
+        "  AND modalidad LIKE 'personalizado%' "
+        "  AND id_equipo IS NOT NULL AND id_equipo != ''"
+        ") "
         "ORDER BY id_transaccion ASC"
     )
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+
+def _obtener_ordenes_en_proceso():
+    """Órdenes en estado 'En proceso' (autoservicio o personalizado)."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM transacciones WHERE estado = 'En proceso' ORDER BY id_transaccion ASC"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+async def obtener_ordenes_en_proceso_async():
+    return await run_in_executor(_obtener_ordenes_en_proceso)
 
 
 async def obtener_ventas_activas_async():
@@ -199,41 +229,232 @@ async def marcar_completado_async(id_transaccion, id_equipo):
     await run_in_executor(_marcar_completado, id_transaccion, id_equipo)
 
 
-# ── Confirmación de pago QR (admin) ───────────────────────────────────────────
+# ── Aprobación manual de peso y pago por terminal (admin) ─────────────────────
 
 
-def _confirmar_pago_qr(id_transaccion, usuario):
-    """Marca la orden como pagada tras confirmación del admin vía panel.
-    Registra en notas: 'PAGO CONFIRMADO por {usuario} a las {fecha}'.
-    No-op si la orden ya estaba confirmada (idempotente)."""
+def _registrar_venta_pendiente_peso(
+    servicio, peso_kg, nombre_cliente, duracion, modalidad
+):
+    """Crea una orden en estado 'Pendiente-peso' a la espera de validación del admin."""
     conn = _get_connection()
     cursor = conn.cursor()
+    fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    etapa = "Recibido" if modalidad == "personalizado" else None
     cursor.execute(
-        "SELECT notas FROM transacciones WHERE id_transaccion = ?",
-        (id_transaccion,),
+        """
+        INSERT INTO transacciones
+            (fecha_hora, tipo_servicio, monto_pagado, dinero_ingresado, cambio_devuelto,
+             id_equipo, duracion_estimada_min, estado, nombre_cliente,
+             peso_kg, notas, etapa_kanban, modalidad)
+        VALUES (?, ?, 0, 0, 0, 'N/A', ?, 'Pendiente-peso', ?, ?, '', ?, ?)
+    """,
+        (fecha_hora, servicio, duracion, nombre_cliente, peso_kg, etapa, modalidad),
     )
-    row = cursor.fetchone()
-    if row is None:
-        conn.close()
-        return False
-    notas_actuales = (row[0] or "").strip()
-    if "PAGO CONFIRMADO" in notas_actuales:
-        conn.close()
-        return False  # ya confirmado
+    conn.commit()
+    nuevo_id = cursor.lastrowid
+    conn.close()
+    return nuevo_id
+
+
+async def registrar_venta_pendiente_peso_async(
+    servicio, peso_kg, nombre_cliente, duracion, modalidad
+):
+    return await run_in_executor(
+        _registrar_venta_pendiente_peso,
+        servicio,
+        peso_kg,
+        nombre_cliente,
+        duracion,
+        modalidad,
+    )
+
+
+def _aprobar_peso(id_transaccion, peso_final, usuario):
+    conn = _get_connection()
+    cursor = conn.cursor()
     ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    marca = f"PAGO CONFIRMADO por {usuario} a las {ahora}"
-    nuevas_notas = f"{notas_actuales} | {marca}" if notas_actuales else marca
+    nota = f"PESO APROBADO por {usuario} a las {ahora}"
     cursor.execute(
-        "UPDATE transacciones SET notas = ?, estado = 'Pendiente' WHERE id_transaccion = ?",
-        (nuevas_notas, id_transaccion),
+        """
+        UPDATE transacciones
+        SET estado = 'Procesando-pago', peso_kg = ?, notas = ?, validado_por = ?
+        WHERE id_transaccion = ? AND estado = 'Pendiente-peso'
+    """,
+        (peso_final, nota, usuario, id_transaccion),
     )
     conn.commit()
     conn.close()
-    return True
 
 
-async def confirmar_pago_qr_async(id_transaccion, usuario):
-    return await run_in_executor(_confirmar_pago_qr, id_transaccion, usuario)
+async def aprobar_peso_async(id_transaccion, peso_final, usuario):
+    await run_in_executor(_aprobar_peso, id_transaccion, peso_final, usuario)
+
+
+def _rechazar_peso(id_transaccion, usuario):
+    """Borra la orden 'Pendiente-peso'. Registra en notas no persistente (log)."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM transacciones WHERE id_transaccion = ? AND estado = 'Pendiente-peso'",
+        (id_transaccion,),
+    )
+    conn.commit()
+    conn.close()
+
+
+async def rechazar_peso_async(id_transaccion, usuario):
+    await run_in_executor(_rechazar_peso, id_transaccion, usuario)
+
+
+def _registrar_venta_pendiente_terminal(
+    servicio, peso_kg, monto, nombre_cliente, duracion, modalidad
+):
+    """Crea una orden 'Pendiente-pago' cuando el cliente elige pagar por terminal."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    fecha_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    etapa = "Recibido" if modalidad == "personalizado" else None
+    cursor.execute(
+        """
+        INSERT INTO transacciones
+            (fecha_hora, tipo_servicio, monto_pagado, dinero_ingresado, cambio_devuelto,
+             id_equipo, duracion_estimada_min, estado, nombre_cliente,
+             peso_kg, notas, etapa_kanban, modalidad)
+        VALUES (?, ?, ?, 0, 0, 'N/A', ?, 'Pendiente-pago', ?, ?, '', ?, ?)
+    """,
+        (
+            fecha_hora,
+            servicio,
+            monto,
+            duracion,
+            nombre_cliente,
+            peso_kg,
+            etapa,
+            f"{modalidad}-terminal",
+        ),
+    )
+    conn.commit()
+    nuevo_id = cursor.lastrowid
+    conn.close()
+    return nuevo_id
+
+
+async def registrar_venta_pendiente_terminal_async(
+    servicio, peso_kg, monto, nombre_cliente, duracion, modalidad
+):
+    return await run_in_executor(
+        _registrar_venta_pendiente_terminal,
+        servicio,
+        peso_kg,
+        monto,
+        nombre_cliente,
+        duracion,
+        modalidad,
+    )
+
+
+def _aprobar_pago_terminal(id_transaccion, folio, usuario):
+    conn = _get_connection()
+    cursor = conn.cursor()
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    nota = f"PAGO TERMINAL confirmado por {usuario} a las {ahora}"
+    cursor.execute(
+        """
+        UPDATE transacciones
+        SET estado = 'Pendiente',
+            numero_transaccion_terminal = ?,
+            notas = ?,
+            validado_por = ?
+        WHERE id_transaccion = ? AND estado = 'Pendiente-pago'
+    """,
+        (folio or "", nota, usuario, id_transaccion),
+    )
+    conn.commit()
+    conn.close()
+
+
+async def aprobar_pago_terminal_async(id_transaccion, folio, usuario):
+    await run_in_executor(_aprobar_pago_terminal, id_transaccion, folio, usuario)
+
+
+def _cancelar_pago_pendiente(id_transaccion, usuario):
+    """Borra una orden 'Pendiente-pago' o 'Procesando-pago' si se cancela."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM transacciones WHERE id_transaccion = ? AND estado IN ('Pendiente-pago', 'Procesando-pago')",
+        (id_transaccion,),
+    )
+    conn.commit()
+    conn.close()
+
+
+async def cancelar_pago_pendiente_async(id_transaccion, usuario):
+    await run_in_executor(_cancelar_pago_pendiente, id_transaccion, usuario)
+
+
+def _marcar_pendiente_pago(id_transaccion, monto, modalidad=None):
+    """Convierte una orden 'Procesando-pago' en 'Pendiente-pago'.
+    Si no se indica modalidad, se deriva automáticamente como {base}-terminal."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    if modalidad is None:
+        cursor.execute(
+            "SELECT modalidad FROM transacciones WHERE id_transaccion = ? AND estado = 'Procesando-pago'",
+            (id_transaccion,),
+        )
+        row = cursor.fetchone()
+        base = row[0].split("-")[0] if row and row[0] else "autoservicio"
+        modalidad = f"{base}-terminal"
+    cursor.execute(
+        """
+        UPDATE transacciones
+        SET estado = 'Pendiente-pago', monto_pagado = ?, modalidad = ?
+        WHERE id_transaccion = ? AND estado = 'Procesando-pago'
+    """,
+        (monto, modalidad, id_transaccion),
+    )
+    actualizado = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return id_transaccion if actualizado else None
+
+
+async def marcar_pendiente_pago_async(id_transaccion, monto, modalidad=None):
+    return await run_in_executor(
+        _marcar_pendiente_pago, id_transaccion, monto, modalidad
+    )
+
+
+def _guardar_pago_orden(id_transaccion, metodo, monto, ingresado, cambio, modalidad):
+    """Actualiza una orden 'Procesando-pago' existente con los datos de pago.
+    Devuelve el id si se actualizó, o None si no se encontró una orden en Procesando-pago."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE transacciones
+        SET estado = 'Pendiente',
+            monto_pagado = ?,
+            dinero_ingresado = ?,
+            cambio_devuelto = ?,
+            modalidad = ?
+        WHERE id_transaccion = ? AND estado = 'Procesando-pago'
+    """,
+        (monto, ingresado, cambio, modalidad, id_transaccion),
+    )
+    actualizado = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return id_transaccion if actualizado else None
+
+
+async def guardar_pago_orden_async(
+    id_transaccion, metodo, monto, ingresado, cambio, modalidad
+):
+    return await run_in_executor(
+        _guardar_pago_orden, id_transaccion, metodo, monto, ingresado, cambio, modalidad
+    )
 
 
 # ── Lavado Personalizado (Kanban) ─────────────────────────────────────────────

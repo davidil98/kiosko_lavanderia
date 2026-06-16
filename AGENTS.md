@@ -13,8 +13,7 @@ src/web_app/main.py         # Main NiceGUI app entry point
 src/web_app/models.py       # State management (KioskoState dataclass)
 src/web_app/database_web.py # Async SQLite operations
 src/web_app/hardware.py     # GPIO control for machines/coins
-src/web_app/metodos_pago.py # Strategy pattern for payment methods (monedas, QR, etc.)
-src/web_app/mp_qr.py        # Mercado Pago QR API integration
+src/web_app/metodos_pago.py # Strategy pattern for payment methods (monedas, terminal)
 src/kiosko_pago.py          # Legacy customtkinter desktop app (deprecated)
 src/database.py             # Legacy sync database module
 src/mp_dev/                 # MercadoPago integration scripts
@@ -70,7 +69,7 @@ pip install -r requirements.txt
 To run the app in test mode and verify functionality:
 1. `cd src/web_app && python main.py test`
 2. Use keyboard keys to simulate coins: `1`=$1, `2`=$2, `5`=$5, `0`=$10
-3. Navigate through the UI flow: select service → enter name → enter weight → insert coins → confirm
+3. Navigate through the UI flow: select service → enter name → enter weight → wait for admin weight approval → select payment method → insert coins / wait for terminal approval → confirm
 
 ---
 
@@ -219,7 +218,7 @@ cursor.execute(
 )
 ```
 
-### File Organization
+###   File Organization
 ```
 src/
   web_app/
@@ -227,11 +226,10 @@ src/
     models.py        # Data classes and KioskoState
     database_web.py  # Async DB operations
     hardware.py      # GPIO and machine control
-    metodos_pago.py  # Strategy pattern: MetodoPago ABC + Monedas/QR/Terminal
-    mp_qr.py         # MercadoPago QR API client (crear/cancelar/verificar)
+    metodos_pago.py  # Strategy pattern: MetodoPago ABC + Monedas/Terminal
   kiosko_pago.py     # Legacy desktop app (do not modify)
   database.py        # Legacy sync DB (do not modify)
-  mp_dev/            # MercadoPago Point terminal scripts (reference, not in main flow)
+  mp_dev/            # MercadoPago reference scripts (not used in main flow)
 ```
 
 ### Comments
@@ -264,13 +262,8 @@ def seleccionar_servicio(self, servicio_nombre: str):
 Create `.env` in project root (not committed to git):
 
 ```
-BYPASS_PASSWORD=admin123   # Password for courtesy/bypass service
-MP_TEST_TOKEN=APP_USR-...  # MercadoPago test access token
-MP_PROD_TOKEN=APP_USR-...  # MercadoPago production access token (when ready)
-MP_ENVIRONMENT=test        # 'test' or 'prod' — selects which token is used
+BYPASS_PASSWORD=admin123   # Password for courtesy/bypass service and admin confirmations
 ```
-
-**Switching to production:** update `MP_PROD_TOKEN` and change `MP_ENVIRONMENT=prod` in `.env`. No code changes needed. Restart the app to apply.
 
 ---
 
@@ -295,24 +288,31 @@ Architecture: **Strategy + Open/Closed**. `MetodoPago` is the abstract base in `
 5. The kiosko will auto-show it in paso 2 (selección de método de pago)
 
 Currently implemented:
-- `MetodoMonedas` (`codigo="monedas"`) — coin acceptor
-- `MetodoQR` (`codigo="qr"`) — Mercado Pago in-store QR (uses `mp_qr.py`)
-- `MetodoTerminalPoint` (`codigo="terminal"`) — placeholder for future Point integration
+- `MetodoMonedas` (`codigo="monedas"`) — coin acceptor (self-service)
+- `MetodoTerminalPoint` (`codigo="terminal"`) — manual card-terminal payment, approved by admin
+
+Approval flow:
+- After the customer enters weight on the kiosk, the order is created with `estado='Pendiente-peso'` and the kiosk shows a "waiting for operator" overlay.
+- The admin sees the order under `/admin/autoservicio` in "Esperando validación de peso" and clicks **Aprobar** or **Rechazar**.
+- If approved, the order moves to `estado='Procesando-pago'` and the kiosk moves to payment-method selection.
+- The admin sees weight-approved orders in `/admin/autoservicio` under **Procesando pago**:
+  - While the customer pays with **coins** (autoservicio only), the order stays in `Procesando-pago` and automatically moves to `Pendiente` once payment is complete.
+  - If the customer chooses **Terminal**, the order becomes `estado='Pendiente-pago'`, the kiosk shows "processing payment" overlay, and the admin enters an optional transaction folio and confirms.
+  - For **personalizado**, **"Pagar en mostrador"** creates a `Pendiente-pago` record with `modalidad='personalizado-pendiente-pago'`; the admin confirms the cash payment before the order moves to `Pendiente`.
+- This applies to both **autoservicio** and **personalizado** services. Personalized orders only move to `/admin/personalizado` once they reach `estado='Pendiente'`.
+- **Coin payment is disabled for personalized services**; they can only pay by terminal or with cash at the counter (both require admin approval).
+- **Cancellation at any point deletes the pending record** from the database, both for autoservicio and personalized.
+- Bypass/courtesy orders are created directly in `estado='Pendiente'` (ready for machine assignment), so they never appear in "Procesando pago".
+- The customer can press **Regresar** on any waiting overlay to cancel the pending record.
 
 ### Sub-state Pattern for Wizard Pasos
 The wizard uses `paso_actual: int` (0, 1, 2, 3, 4) plus boolean flags for sub-states inside a paso:
 - `mostrando_sub_lavar` — true while showing the Lavar sub-menu inside paso 0
 - `mostrando_metodos_pago` — true while showing payment method selection inside paso 2
+- `esperando_aprobacion_admin` — true while the kiosk is waiting for admin approval (weight or terminal payment)
+- `motivo_espera` — `"peso"` or `"pago"`, used to customize the waiting overlay text
 
 **Do not use float or non-int types for `paso_actual`.** When adding a new sub-state, follow this pattern (set the boolean + `_trigger_change()`).
-
-### MercadoPago Production Migration
-- Set `MP_PROD_TOKEN` in `.env` with your production access token
-- Change `MP_ENVIRONMENT=prod` in `.env`
-- No code changes required — `mp_qr.py` auto-selects the right token
-
-### Blackout Recovery (QR Orders)
-On startup, `mp_qr.buscar_y_cancelar_ordenes_abiertas()` runs in the background via `app.on_startup`. It scans the latest open QR orders in MP and cancels them, so a power outage doesn't leave stale `open` orders blocking future sales.
 
 ### Database Migrations
 Add columns safely in `database_web.py`:
@@ -330,13 +330,14 @@ if 'new_column' not in cols_existentes:
 **Problema**: Los emojis no renderizan correctamente en la Raspberry Pi (dependen de fuentes del sistema). La solución es usar íconos SVG en lugar de emojis en toda la UI.
 
 ### Archivos SVG disponibles
-Ubicación: `media/icons/` — 18 SVGs creados con estilo consistente (24x24, `stroke="currentColor"` o fill fijo):
+Ubicación: `media/icons/` — 19 SVGs creados con estilo consistente (24x24, `stroke="currentColor"` o fill fijo):
 
 | Archivo | Uso |
 |---------|-----|
 | `basket.svg` | Kanban "Alistando" |
 | `bed.svg` | Edredones (personalizado) |
 | `box.svg` | Kanban "Listo para Entrega" |
+| `check.svg` | Éxito / orden registrada |
 | `circle-orange.svg` | Badge "En Proceso" |
 | `circle-yellow.svg` | Badge "Pendiente" |
 | `gear.svg` | Máquina en uso / asignada |
@@ -357,8 +358,8 @@ Ubicación: `media/icons/` — 18 SVGs creados con estilo consistente (24x24, `s
 
 | Archivo | Emojis pendientes | Prioridad |
 |---------|-------------------|-----------|
-| `src/web_app/models.py` | 3 (líneas 30, 42, 51) | Alta |
-| `src/web_app/main.py` | 20 (UI kiosko + admin) | Alta |
+| `src/web_app/models.py` | 0 | Alta |
+| `src/web_app/main.py` | 10 (UI kiosko + admin) | Alta |
 | `src/web_app/hardware.py` | 1 (línea 101, consola) | Media |
 | `src/test_voltaje*.py` | 4 (consola, desarrollo) | Baja |
 
