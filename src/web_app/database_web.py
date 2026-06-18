@@ -152,25 +152,31 @@ async def registrar_venta_async(
 
 
 def _obtener_ventas_activas():
-    """Órdenes de autoservicio en cualquier estado pendiente/administrativo y En proceso.
-    También incluye órdenes personalizadas que estén 'En proceso' y tengan una
-    máquina del sistema asignada, para que aparezcan como ocupadas en el panel
-    de autoservicio."""
+    """Órdenes de autoservicio en cualquier estado pendiente/administrativo y 'En proceso'.
+    Incluye también órdenes personalizadas en 'En proceso' con máquina asignada
+    (para que aparezcan como ocupadas en el panel de autoservicio).
+    Las cláusulas son mutuamente excluyentes por modalidad, por lo que no hay duplicados."""
     conn = _get_connection()
     cursor = conn.cursor()
+
+    # La query original usaba OR-clauses. Las reescribimos con condiciones
+    # claras y mutuamente excluyentes para garantizar cero duplicados.
     cursor.execute(
-        "SELECT * FROM transacciones "
-        "WHERE ("
+        "SELECT * FROM transacciones WHERE "
+        # Grupo A: autoservicio en estados pendientes/procesamiento
         "  estado IN ('Pendiente-peso', 'Procesando-pago', 'Pendiente-pago') "
-        "  AND (modalidad IS NULL OR modalidad LIKE 'autoservicio%' OR modalidad LIKE 'personalizado%')"
-        ") OR ("
+        "  AND (modalidad IS NULL OR modalidad LIKE 'autoservicio%') "
+        "UNION ALL "
+        # Grupo B: autoservicio en Pendiente/En proceso
+        "SELECT * FROM transacciones WHERE "
         "  estado IN ('Pendiente', 'En proceso') "
-        "  AND (modalidad IS NULL OR modalidad LIKE 'autoservicio%')"
-        ") OR ("
+        "  AND (modalidad IS NULL OR modalidad LIKE 'autoservicio%') "
+        "UNION ALL "
+        # Grupo C: personalizado en En proceso con máquina asignada
+        "SELECT * FROM transacciones WHERE "
         "  estado = 'En proceso' "
         "  AND modalidad LIKE 'personalizado%' "
-        "  AND id_equipo IS NOT NULL AND id_equipo != ''"
-        ") "
+        "  AND id_equipo IS NOT NULL AND id_equipo != '' "
         "ORDER BY id_transaccion ASC"
     )
     rows = cursor.fetchall()
@@ -428,9 +434,13 @@ async def marcar_pendiente_pago_async(id_transaccion, monto, modalidad=None):
 
 def _guardar_pago_orden(id_transaccion, metodo, monto, ingresado, cambio, modalidad):
     """Actualiza una orden 'Procesando-pago' existente con los datos de pago.
-    Devuelve el id si se actualizó, o None si no se encontró una orden en Procesando-pago."""
+    Si la orden ya fue movida a Pendiente/En proceso (race condition),
+    devuelve el mismo id para evitar duplicados.
+    Solo retorna None si la orden no existe en ningún estado válido."""
     conn = _get_connection()
     cursor = conn.cursor()
+
+    # Intentar actualizar desde Procesando-pago
     cursor.execute(
         """
         UPDATE transacciones
@@ -444,9 +454,22 @@ def _guardar_pago_orden(id_transaccion, metodo, monto, ingresado, cambio, modali
         (monto, ingresado, cambio, modalidad, id_transaccion),
     )
     actualizado = cursor.rowcount > 0
+
+    if not actualizado:
+        # Verificar si la orden ya fue movida a Pendiente/En proceso por otro actor
+        cursor.execute(
+            "SELECT id_transaccion FROM transacciones "
+            "WHERE id_transaccion = ? AND estado IN ('Pendiente', 'En proceso')",
+            (id_transaccion,),
+        )
+        existe = cursor.fetchone()
+        conn.commit()
+        conn.close()
+        return id_transaccion if existe else None
+
     conn.commit()
     conn.close()
-    return id_transaccion if actualizado else None
+    return id_transaccion
 
 
 async def guardar_pago_orden_async(
