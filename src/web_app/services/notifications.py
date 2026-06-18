@@ -5,22 +5,47 @@ from models import KioskoState
 # ── Estado único compartido ──
 state = KioskoState()
 
-_admin_refresh_callbacks: set = set()
+# Callbacks separados por panel: evitan refrescos fantasmas entre vistas
+_operativo_refresh_callbacks: set = set()
+_autoservicio_refresh_callbacks: set = set()
+_personalizado_refresh_callbacks: set = set()
+
 _admin_clients: dict = {}
 _kiosko_clients: dict = {}
 _kiosko_ui_ref = None
 
-
-def registrar_callback_admin(cb):
-    _admin_refresh_callbacks.add(cb)
+# ── Registro por panel ──
 
 
-def remover_callback_admin(cb):
-    _admin_refresh_callbacks.discard(cb)
+def registrar_callback_operativo(cb):
+    _operativo_refresh_callbacks.add(cb)
 
 
-def notificar_admin():
-    for cb in list(_admin_refresh_callbacks):
+def remover_callback_operativo(cb):
+    _operativo_refresh_callbacks.discard(cb)
+
+
+def registrar_callback_autoservicio(cb):
+    _autoservicio_refresh_callbacks.add(cb)
+
+
+def remover_callback_autoservicio(cb):
+    _autoservicio_refresh_callbacks.discard(cb)
+
+
+def registrar_callback_personalizado(cb):
+    _personalizado_refresh_callbacks.add(cb)
+
+
+def remover_callback_personalizado(cb):
+    _personalizado_refresh_callbacks.discard(cb)
+
+
+# ── Notificación dirigida ──
+
+
+def _notificar_callbacks(callbacks: set):
+    for cb in list(callbacks):
         try:
             res = cb()
             if asyncio.iscoroutine(res):
@@ -29,7 +54,32 @@ def notificar_admin():
             pass
 
 
+def notificar_operativo():
+    _notificar_callbacks(_operativo_refresh_callbacks)
+
+
+def notificar_autoservicio():
+    _notificar_callbacks(_autoservicio_refresh_callbacks)
+
+
+def notificar_personalizado():
+    _notificar_callbacks(_personalizado_refresh_callbacks)
+
+
+def notificar_admin():
+    """Notifica a todos los paneles. Cada uno decide si refrescar."""
+    notificar_operativo()
+    notificar_autoservicio()
+    notificar_personalizado()
+
+
 state.notificar_admin = notificar_admin
+
+# ── Compatibilidad hacia atrás (las llamadas genéricas siguen funcionando) ──
+registrar_callback_admin = registrar_callback_operativo
+remover_callback_admin = remover_callback_operativo
+
+# ── Kiosko ──
 
 
 def set_kiosko_ui_ref(ref):
@@ -62,6 +112,9 @@ def notificar_kiosko(mensaje: str = "", tipo: str = "positive"):
                     ui.notify(mensaje, type=tipo, position="top")
             except Exception:
                 pass
+
+
+# ── Admin clients ──
 
 
 def registrar_admin_client(client) -> str:

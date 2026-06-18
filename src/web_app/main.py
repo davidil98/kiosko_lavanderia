@@ -29,6 +29,7 @@ app.on_shutdown(hardware.limpiar_pines)
 import pages.kiosko  # noqa: E402
 import pages.admin_login  # noqa: E402
 import pages.admin_dashboard  # noqa: E402
+import pages.admin_operativo  # noqa: E402
 import pages.admin_autoservicio  # noqa: E402
 import pages.admin_personalizado  # noqa: E402
 

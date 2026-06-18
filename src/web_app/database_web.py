@@ -151,32 +151,17 @@ async def registrar_venta_async(
 # ── Autoservicio ──────────────────────────────────────────────────────────────
 
 
-def _obtener_ventas_activas():
-    """Órdenes de autoservicio en cualquier estado pendiente/administrativo y 'En proceso'.
-    Incluye también órdenes personalizadas en 'En proceso' con máquina asignada
-    (para que aparezcan como ocupadas en el panel de autoservicio).
-    Las cláusulas son mutuamente excluyentes por modalidad, por lo que no hay duplicados."""
+# ── Panel Operativo (bandeja de entrada unificada) ──
+
+
+def _obtener_ordenes_pendientes_admin():
+    """Órdenes que requieren acción administrativa: pendientes de peso o de pago.
+    Sin importar modalidad — todas pasan por el operativo."""
     conn = _get_connection()
     cursor = conn.cursor()
-
-    # La query original usaba OR-clauses. Las reescribimos con condiciones
-    # claras y mutuamente excluyentes para garantizar cero duplicados.
     cursor.execute(
-        "SELECT * FROM transacciones WHERE "
-        # Grupo A: autoservicio en estados pendientes/procesamiento
-        "  estado IN ('Pendiente-peso', 'Procesando-pago', 'Pendiente-pago') "
-        "  AND (modalidad IS NULL OR modalidad LIKE 'autoservicio%') "
-        "UNION ALL "
-        # Grupo B: autoservicio en Pendiente/En proceso
-        "SELECT * FROM transacciones WHERE "
-        "  estado IN ('Pendiente', 'En proceso') "
-        "  AND (modalidad IS NULL OR modalidad LIKE 'autoservicio%') "
-        "UNION ALL "
-        # Grupo C: personalizado en En proceso con máquina asignada
-        "SELECT * FROM transacciones WHERE "
-        "  estado = 'En proceso' "
-        "  AND modalidad LIKE 'personalizado%' "
-        "  AND id_equipo IS NOT NULL AND id_equipo != '' "
+        "SELECT * FROM transacciones "
+        "WHERE estado IN ('Pendiente-peso', 'Procesando-pago', 'Pendiente-pago') "
         "ORDER BY id_transaccion ASC"
     )
     rows = cursor.fetchall()
@@ -184,8 +169,54 @@ def _obtener_ventas_activas():
     return [dict(row) for row in rows]
 
 
+async def obtener_ordenes_pendientes_admin_async():
+    return await run_in_executor(_obtener_ordenes_pendientes_admin)
+
+
+def _obtener_contadores_pendientes():
+    """Cuenta órdenes por tipo para los badges del dashboard."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT estado, COUNT(*) as cnt FROM transacciones "
+        "WHERE estado IN ('Pendiente-peso', 'Procesando-pago', 'Pendiente-pago', 'Pendiente', 'En proceso') "
+        "GROUP BY estado"
+    )
+    counts = {row[0]: row[1] for row in cursor.fetchall()}
+    conn.close()
+    return counts
+
+
+async def obtener_contadores_pendientes_async():
+    return await run_in_executor(_obtener_contadores_pendientes)
+
+
+# ── Panel Autoservicio (solo ejecución: asignar + en proceso) ──
+
+
+def _obtener_ordenes_autoservicio_asignacion():
+    """Órdenes de autoservicio listas para asignar máquina ('Pendiente')
+    o ya en ejecución ('En proceso'). Solo autoservicio."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM transacciones "
+        "WHERE estado IN ('Pendiente', 'En proceso') "
+        "AND (modalidad IS NULL OR modalidad LIKE 'autoservicio%') "
+        "ORDER BY id_transaccion ASC"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+async def obtener_ordenes_autoservicio_asignacion_async():
+    return await run_in_executor(_obtener_ordenes_autoservicio_asignacion)
+
+
 def _obtener_ordenes_en_proceso():
-    """Órdenes en estado 'En proceso' (autoservicio o personalizado)."""
+    """Órdenes en estado 'En proceso' (autoservicio o personalizado).
+    Usado solo para recuperación tras apagón."""
     conn = _get_connection()
     cursor = conn.cursor()
     cursor.execute(
@@ -198,10 +229,6 @@ def _obtener_ordenes_en_proceso():
 
 async def obtener_ordenes_en_proceso_async():
     return await run_in_executor(_obtener_ordenes_en_proceso)
-
-
-async def obtener_ventas_activas_async():
-    return await run_in_executor(_obtener_ventas_activas)
 
 
 def _marcar_en_proceso(id_transaccion, id_equipo):
@@ -433,14 +460,11 @@ async def marcar_pendiente_pago_async(id_transaccion, monto, modalidad=None):
 
 
 def _guardar_pago_orden(id_transaccion, metodo, monto, ingresado, cambio, modalidad):
-    """Actualiza una orden 'Procesando-pago' existente con los datos de pago.
-    Si la orden ya fue movida a Pendiente/En proceso (race condition),
-    devuelve el mismo id para evitar duplicados.
-    Solo retorna None si la orden no existe en ningún estado válido."""
+    """Actualiza una orden 'Procesando-pago' → 'Pendiente' con los datos de pago.
+    Retorna el id si se actualizó, o None si la orden ya no estaba en ese estado
+    (cancelada o ya procesada por el operativo)."""
     conn = _get_connection()
     cursor = conn.cursor()
-
-    # Intentar actualizar desde Procesando-pago
     cursor.execute(
         """
         UPDATE transacciones
@@ -454,29 +478,22 @@ def _guardar_pago_orden(id_transaccion, metodo, monto, ingresado, cambio, modali
         (monto, ingresado, cambio, modalidad, id_transaccion),
     )
     actualizado = cursor.rowcount > 0
-
-    if not actualizado:
-        # Verificar si la orden ya fue movida a Pendiente/En proceso por otro actor
-        cursor.execute(
-            "SELECT id_transaccion FROM transacciones "
-            "WHERE id_transaccion = ? AND estado IN ('Pendiente', 'En proceso')",
-            (id_transaccion,),
-        )
-        existe = cursor.fetchone()
-        conn.commit()
-        conn.close()
-        return id_transaccion if existe else None
-
     conn.commit()
     conn.close()
-    return id_transaccion
+    return id_transaccion if actualizado else None
 
 
 async def guardar_pago_orden_async(
     id_transaccion, metodo, monto, ingresado, cambio, modalidad
 ):
     return await run_in_executor(
-        _guardar_pago_orden, id_transaccion, metodo, monto, ingresado, cambio, modalidad
+        _guardar_pago_orden,
+        id_transaccion,
+        metodo,
+        monto,
+        ingresado,
+        cambio,
+        modalidad,
     )
 
 

@@ -26,16 +26,13 @@ async def finalizar_pago():
     metodo = state.metodo_pago_codigo or "monedas"
     es_pers = state.servicio_seleccionado.modalidad == "personalizado"
     modalidad = f"personalizado-{metodo}" if es_pers else f"autoservicio-{metodo}"
-    print(
-        f"[main] finalizar_pago: cliente={state.nombre_cliente} "
-        f"servicio={state.servicio_seleccionado.nombre} metodo={metodo} modalidad={modalidad}"
-    )
     ingresado = (
         state.dinero_ingresado
         if metodo == "monedas"
         else state.servicio_seleccionado.precio
     )
     cambio = state.get_cambio() if metodo == "monedas" else 0
+
     nuevo_id = await database_web.guardar_pago_orden_async(
         state.ultimo_id_transaccion,
         metodo,
@@ -44,21 +41,16 @@ async def finalizar_pago():
         cambio,
         modalidad,
     )
+
     if nuevo_id is None:
-        print(
-            f"[main] finalizar_pago: No se pudo actualizar orden {state.ultimo_id_transaccion}. Creando nueva."
+        ui.notify(
+            "La orden ya no está disponible. Reiniciando...",
+            type="negative",
+            position="top",
         )
-        nuevo_id = await database_web.registrar_venta_async(
-            servicio=state.servicio_seleccionado.nombre,
-            monto=state.servicio_seleccionado.precio,
-            ingresado=ingresado,
-            cambio=cambio,
-            equipo="N/A",
-            duracion=state.servicio_seleccionado.duracion_min,
-            nombre_cliente=state.nombre_cliente,
-            peso_kg=state.peso_ingresado,
-            modalidad=modalidad,
-        )
+        state.reset()
+        return
+
     state.procesar_exito(nuevo_id)
     notificar_admin()
     await asyncio.sleep(7)

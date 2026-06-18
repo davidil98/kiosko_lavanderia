@@ -327,3 +327,30 @@ def tiempo_restante_sostenido(equipo_id: str) -> int:
     transcurrido = time.time() - info["inicio"]
     total = info["duracion_min"] * 60
     return max(0, int(total - transcurrido))
+
+
+def equipo_esta_ocupado(equipo_id: str) -> bool:
+    """Verifica si una máquina está ocupada, sin importar la modalidad
+    (autoservicio o personalizado). Consulta estado en memoria (sostenido)
+    y también la base de datos (pulso en 'En proceso')."""
+    if equipo_sostenido_activo(equipo_id):
+        return True
+    eq = EQUIPOS.get(equipo_id)
+    if not eq:
+        return False
+    nombre = eq["nombre"]
+    try:
+        import database_web
+
+        conn = database_web._get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(*) FROM transacciones "
+            "WHERE estado = 'En proceso' AND id_equipo = ?",
+            (nombre,),
+        )
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count > 0
+    except Exception:
+        return False

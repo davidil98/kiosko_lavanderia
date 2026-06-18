@@ -6,8 +6,8 @@ import hardware
 import database_web
 from services.auth import redirigir_si_no_autenticado, usuario_actual, USUARIOS
 from services.notifications import (
-    registrar_callback_admin,
-    remover_callback_admin,
+    registrar_callback_personalizado,
+    remover_callback_personalizado,
     registrar_admin_client,
     remover_admin_client,
     get_admin_client,
@@ -216,6 +216,7 @@ async def admin_personalizado():
                                         eid: eq
                                         for eid, eq in hardware.EQUIPOS.items()
                                         if peso_o <= eq["capacidad_kg"]
+                                        and not hardware.equipo_esta_ocupado(eid)
                                     }
 
                                     if not maquinas_ok:
@@ -364,5 +365,5 @@ async def admin_personalizado():
                 ).classes("text-xs")
 
     await vista_kanban()
-    registrar_callback_admin(vista_kanban.refresh)
-    page_client.on_disconnect(lambda: remover_callback_admin(vista_kanban.refresh))
+    registrar_callback_personalizado(vista_kanban.refresh)
+    page_client.on_disconnect(lambda: remover_callback_personalizado(vista_kanban.refresh))

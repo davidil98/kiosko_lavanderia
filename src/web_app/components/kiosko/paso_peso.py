@@ -48,8 +48,8 @@ async def seleccionar_metodo_pago(metodo_cls, kiosko_ui_ref):
 
 async def finalizar_servicio_personalizado():
     if state.ultimo_id_transaccion is None:
-        ui.notify(
-            "No hay una orden activa. Vuelve a ingresar el peso.", type="negative"
+        notificar_kiosko(
+            "No hay una orden activa. Vuelve a ingresar el peso.", tipo="negative"
         )
         return
     id_orden = await database_web.marcar_pendiente_pago_async(
@@ -251,18 +251,16 @@ def _render_ingreso_peso(kiosko_ui_ref):
 
         async def enviar_peso_a_revision():
             if state.peso_ingresado <= 0:
-                ui.notify(
+                notificar_kiosko(
                     "Por favor ingresa un peso válido mayor a 0.",
-                    type="warning",
+                    tipo="warning",
                 )
                 return
             if max_kg and state.peso_ingresado > max_kg:
-                ui.notify(
+                notificar_kiosko(
                     f"Retire peso de carga que no exceda los {max_kg} kg "
                     f"y divida su carga solicitando más servicios.",
-                    type="negative",
-                    position="top",
-                    timeout=10000,
+                    tipo="negative",
                 )
                 state.peso_ingresado = 0.0
                 peso_buffer["val"] = "0"
