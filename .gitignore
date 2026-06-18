@@ -6,3 +6,4 @@ ecoluna_datos.db
 *.code-workspace
 agent_notation
 AGENTS.md
+.nicegui

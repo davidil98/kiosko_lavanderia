@@ -129,7 +129,7 @@ Para activar el producto y obtener la API dinámica:
 
 1. **Inicia sesión** en [Tus Integraciones](https://www.mercadopago.com.mx/developers/panel/app) con la cuenta vendedora.
 2. **Crea una integración** tipo "QR modelo atendido" / "QR in-store" (suele estar en "Productos disponibles" → "Pagos presenciales" → "QR modelo atendido").
-3. **Asocia tu POS `CAJA01`** (puedes usar `src/mp_dev/create_checkout.py` para crearlo si no existe).
+3. **Asocia tu POS `CAJA01`** (puedes usar `tools/mp_dev/create_checkout.py` para crearlo si no existe).
 4. **Verifica que el sponsor** (tu `MP_USER_ID` en `.env`) sea el dueño de la cuenta vendedora.
 5. **Espera ~5 minutos** a que MP propague los cambios.
 6. **Reinicia el kiosko** y vuelve a probar.

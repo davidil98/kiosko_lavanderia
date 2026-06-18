@@ -21,7 +21,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Cargar .env desde la raíz del proyecto
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 load_dotenv(PROJECT_ROOT / ".env")
 
 BASE_URL = "https://api.mercadopago.com"

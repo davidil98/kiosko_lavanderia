@@ -14,9 +14,9 @@ src/web_app/models.py       # State management (KioskoState dataclass)
 src/web_app/database_web.py # Async SQLite operations
 src/web_app/hardware.py     # GPIO control for machines/coins
 src/web_app/metodos_pago.py # Strategy pattern for payment methods (monedas, terminal)
-src/kiosko_pago.py          # Legacy customtkinter desktop app (deprecated)
-src/database.py             # Legacy sync database module
-src/mp_dev/                 # MercadoPago integration scripts
+tools/                      # Hardware test scripts and MercadoPago reference tools
+tools/test_voltaje*.py      # GPIO hardware diagnostic scripts
+tools/mp_dev/               # MercadoPago integration reference scripts
 data/ecoluna_datos.db       # SQLite database file
 media/                      # Static assets (logos, images, icons/)
 media/icons/                # SVG icons (used instead of emojis for Pi compat)
@@ -38,21 +38,16 @@ cd src/web_app && python main.py test
 # In test mode: press 1/2/5/0 keys to simulate $1/$2/$5/$10 coins
 ```
 
-### Legacy Desktop App (Deprecated)
-```bash
-cd src && python kiosko_pago.py
-```
-
-### Single Test Scripts (hardware testing only)
+### Hardware Test Scripts (tools/)
 ```bash
 # Test GPIO voltage on pin 21 (monedero)
-python src/test_voltaje.py
+python tools/test_voltaje.py
 
 # Test coin reader logic
-python src/test_voltaje_monedero.py
+python tools/test_voltaje_monedero.py
 
 # Test voltage on specific pin
-python src/test_voltaje_key.py
+python tools/test_voltaje_key.py
 ```
 
 ### Install Dependencies
@@ -222,14 +217,14 @@ cursor.execute(
 ```
 src/
   web_app/
-    main.py          # Routes, UI, callbacks (largest file ~1100 lines)
+    main.py          # Routes, UI, callbacks
     models.py        # Data classes and KioskoState
     database_web.py  # Async DB operations
     hardware.py      # GPIO and machine control
     metodos_pago.py  # Strategy pattern: MetodoPago ABC + Monedas/Terminal
-  kiosko_pago.py     # Legacy desktop app (do not modify)
-  database.py        # Legacy sync DB (do not modify)
-  mp_dev/            # MercadoPago reference scripts (not used in main flow)
+tools/
+  test_voltaje*.py    # GPIO hardware diagnostic scripts
+  mp_dev/             # MercadoPago reference scripts (not used in main flow)
 ```
 
 ### Comments
@@ -361,7 +356,7 @@ Ubicación: `media/icons/` — 19 SVGs creados con estilo consistente (24x24, `s
 | `src/web_app/models.py` | 0 | Alta |
 | `src/web_app/main.py` | 10 (UI kiosko + admin) | Alta |
 | `src/web_app/hardware.py` | 1 (línea 101, consola) | Media |
-| `src/test_voltaje*.py` | 4 (consola, desarrollo) | Baja |
+| `tools/test_voltaje*.py` | 4 (consola, desarrollo) | Baja |
 
 ### Patrón de reemplazo
 
