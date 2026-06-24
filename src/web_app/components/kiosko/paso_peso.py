@@ -30,6 +30,15 @@ async def _kiosko_regresar_espera(kiosko_ui_ref):
         state.limpiar_espera_admin()
         notificar_admin()
     elif state.motivo_espera == "pago" and state.ultimo_id_transaccion:
+        # Si hay una orden Point activa, intentar cancelar por API (best effort)
+        if state.metodo_pago_codigo == "point":
+            mp_id = await database_web.obtener_mp_order_id_async(
+                state.ultimo_id_transaccion
+            )
+            if mp_id:
+                from services import mercadopago
+
+                await asyncio.to_thread(mercadopago.cancelar_orden, mp_id)
         await database_web.cancelar_pago_pendiente_async(
             state.ultimo_id_transaccion, "cliente"
         )
@@ -88,6 +97,12 @@ def _render_esperando_admin(kiosko_ui_ref):
             "Por favor espera mientras el operador revisa el peso "
             f"de tu ropa (<strong>{state.peso_en_revision} kg</strong>)."
         )
+    elif state.metodo_pago_codigo == "point":
+        titulo = "Procesando pago con Point"
+        mensaje = (
+            "Acerca tu tarjeta o dispositivo a la terminal Point cuando "
+            "te lo indique el operador. La confirmación es automática."
+        )
     elif state.metodo_pago_codigo == "mostrador":
         titulo = "Esperando confirmación de pago"
         mensaje = (
@@ -114,12 +129,8 @@ def _render_esperando_admin(kiosko_ui_ref):
     """)
     ui.button(
         "\u2190 Regresar",
-        on_click=lambda: asyncio.create_task(
-            _kiosko_regresar_espera(kiosko_ui_ref)
-        ),
-    ).classes("btn-confirmar-nombre max-w-xs mx-auto mt-6").style(
-        "background:#334155;"
-    )
+        on_click=lambda: asyncio.create_task(_kiosko_regresar_espera(kiosko_ui_ref)),
+    ).classes("btn-confirmar-nombre max-w-xs mx-auto mt-6").style("background:#334155;")
 
 
 def _render_metodos_pago(kiosko_ui_ref):
@@ -139,10 +150,8 @@ def _render_metodos_pago(kiosko_ui_ref):
                 .classes("card-servicio")
                 .on(
                     "click",
-                    lambda cls=metodo_cls: (
-                        asyncio.create_task(
-                            seleccionar_metodo_pago(cls, kiosko_ui_ref)
-                        )
+                    lambda cls=metodo_cls: asyncio.create_task(
+                        seleccionar_metodo_pago(cls, kiosko_ui_ref)
                     ),
                 )
             ):
@@ -159,9 +168,7 @@ def _render_metodos_pago(kiosko_ui_ref):
     if es_personalizado:
         ui.button(
             "Pagar en mostrador al recibir",
-            on_click=lambda: asyncio.create_task(
-                finalizar_servicio_personalizado()
-            ),
+            on_click=lambda: asyncio.create_task(finalizar_servicio_personalizado()),
         ).classes("btn-confirmar-nombre max-w-sm mx-auto mt-4").style(
             "background:#a78bfa;"
         )
@@ -174,9 +181,7 @@ def _render_metodos_pago(kiosko_ui_ref):
 
     ui.button(
         "\u2715 Cancelar orden",
-        on_click=lambda: asyncio.create_task(
-            _cancelar_desde_metodos_pago()
-        ),
+        on_click=lambda: asyncio.create_task(_cancelar_desde_metodos_pago()),
     ).classes("btn-confirmar-nombre max-w-xs mx-auto mt-6").style(
         "background:#991b1b;color:#fecaca;"
     )
@@ -233,21 +238,29 @@ def _render_ingreso_peso(kiosko_ui_ref):
             state.peso_ingresado = float(v) if v not in ("", ".") else 0.0
             display_peso.set_text(f"{v} kg")
 
-        with ui.element("div").classes("numpad mx-auto mt-2").style(
-            "max-width:280px;"
-        ):
+        with ui.element("div").classes("numpad mx-auto mt-2").style("max-width:280px;"):
             for d in [
-                "7", "8", "9", "4", "5", "6", "1", "2", "3",
-                ".", "0", "\u232b",
+                "7",
+                "8",
+                "9",
+                "4",
+                "5",
+                "6",
+                "1",
+                "2",
+                "3",
+                ".",
+                "0",
+                "\u232b",
             ]:
                 color = (
                     "bg-red-900"
                     if d == "\u232b"
                     else ("bg-slate-600" if d == "." else "bg-slate-700")
                 )
-                ui.button(
-                    d, on_click=lambda x=d: presionar_num(x)
-                ).classes(f"numpad-btn {color} text-white font-bold")
+                ui.button(d, on_click=lambda x=d: presionar_num(x)).classes(
+                    f"numpad-btn {color} text-white font-bold"
+                )
 
         async def enviar_peso_a_revision():
             if state.peso_ingresado <= 0:
@@ -280,7 +293,5 @@ def _render_ingreso_peso(kiosko_ui_ref):
 
         ui.button(
             "Continuar",
-            on_click=lambda: asyncio.create_task(
-                enviar_peso_a_revision()
-            ),
+            on_click=lambda: asyncio.create_task(enviar_peso_a_revision()),
         ).classes("btn-confirmar-nombre max-w-sm mx-auto mt-4")

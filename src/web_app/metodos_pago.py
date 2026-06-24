@@ -112,9 +112,9 @@ class MetodoMonedas(MetodoPago):
 
 class MetodoTerminalPoint(MetodoPago):
     codigo = "terminal"
-    nombre = "Terminal Point"
-    icono = "/media/icons/leaf.svg"
-    descripcion = "Paga con tarjeta en la terminal (operador)"
+    nombre = "Punto Point"
+    icono = "/media/icons/ticket.svg"
+    descripcion = "Paga con tarjeta en la terminal Point"
 
     async def procesar_pago(self) -> ResultadoPago:
         return ResultadoPago(
@@ -126,6 +126,7 @@ class MetodoTerminalPoint(MetodoPago):
         import asyncio
         import database_web
         from nicegui import ui
+        from services import mercadopago
 
         state = self.state
 
@@ -149,40 +150,65 @@ class MetodoTerminalPoint(MetodoPago):
                     f'<div class="monto-valor">${state.servicio_seleccionado.precio}</div>'
                 )
                 ui.html(
-                    '<div class="monto-sub">El operador encenderá la terminal y acercará el dispositivo</div>'
+                    '<div class="monto-sub">Al continuar, se enviará la orden a la terminal Point</div>'
                 )
 
-            async def _iniciar_cobro_terminal():
+            async def _iniciar_cobro_point():
                 if state.ultimo_id_transaccion is None:
                     ui.notify(
                         "No hay una orden activa. Vuelve a ingresar el peso.",
                         type="negative",
                     )
                     return
+                monto = state.servicio_seleccionado.precio
+                descripcion = f"EcoLuna - {state.servicio_seleccionado.nombre}"
+                ref = f"ECOLUNA_KIOSKO_{state.ultimo_id_transaccion}"
+
+                # Llamada bloqueante a MP en hilo separado para no congelar el kiosko
+                order = await asyncio.to_thread(
+                    mercadopago.crear_orden_point, monto, descripcion, ref
+                )
+                mp_order_id = str(order.get("id", "")) if order else ""
+                if not mp_order_id:
+                    ui.notify(
+                        "No se pudo conectar con la terminal Point. Intenta de nuevo.",
+                        type="negative",
+                        position="top",
+                        timeout=6000,
+                    )
+                    return
+
+                base = state.servicio_seleccionado.modalidad or "autoservicio"
                 id_orden = await database_web.marcar_pendiente_pago_async(
-                    state.ultimo_id_transaccion, state.servicio_seleccionado.precio
+                    state.ultimo_id_transaccion,
+                    monto,
+                    modalidad=f"{base}-point",
+                    mp_order_id=mp_order_id,
                 )
                 if id_orden is None:
-                    # Fallback: crear un registro nuevo si no se pudo actualizar
+                    # Fallback: crear registro nuevo
                     id_orden = (
                         await database_web.registrar_venta_pendiente_terminal_async(
                             servicio=state.servicio_seleccionado.nombre,
                             peso_kg=state.peso_ingresado,
-                            monto=state.servicio_seleccionado.precio,
+                            monto=monto,
                             nombre_cliente=state.nombre_cliente,
                             duracion=state.servicio_seleccionado.duracion_min,
-                            modalidad=state.servicio_seleccionado.modalidad,
+                            modalidad=f"{base}-point",
                         )
                     )
+                    # Guardar mp_order_id en la nueva fila
+                    await database_web.guardar_mp_order_id_async(id_orden, mp_order_id)
                 state.ultimo_id_transaccion = id_orden
+                state.metodo_pago_codigo = "point"
                 state.marcar_esperando_admin("pago")
                 if callable(getattr(state, "notificar_admin", None)):
                     state.notificar_admin()
 
             ui.button(
-                "Cobrar en terminal",
+                "Pagar con Point",
                 color="green",
-                on_click=_iniciar_cobro_terminal,
+                on_click=_iniciar_cobro_point,
             ).classes("w-full text-lg font-bold py-3").style("margin-top:16px;")
 
             ui.button("Cancelar y regresar", color="red").classes("btn-cancelar").on(

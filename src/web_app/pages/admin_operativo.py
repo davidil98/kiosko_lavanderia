@@ -17,7 +17,10 @@ from services.notifications import (
     get_admin_client,
 )
 from components.admin.header import render_admin_header
-from components.admin.operativo_seccion import render_esperando_peso, render_procesando_pago
+from components.admin.operativo_seccion import (
+    render_esperando_peso,
+    render_procesando_pago,
+)
 from components.shared import render_seccion
 
 
@@ -125,9 +128,7 @@ async def admin_operativo():
         with ui.element("div").props("id=admin-content").style("width:100%;"):
             pendientes = await database_web.obtener_ordenes_pendientes_admin_async()
 
-            esperando_peso = [
-                v for v in pendientes if v["estado"] == "Pendiente-peso"
-            ]
+            esperando_peso = [v for v in pendientes if v["estado"] == "Pendiente-peso"]
             procesando_pago = [
                 v
                 for v in pendientes
@@ -193,6 +194,17 @@ async def admin_operativo():
         notificar_kiosko("El administrador pidió volver a pesar.", "warning")
 
     async def confirmar_pago(venta, folio_input):
+        # Las órdenes Point se confirman automáticamente desde la terminal
+        if "point" in venta.get("modalidad", ""):
+            cl = _client()
+            if cl:
+                with cl:
+                    ui.notify(
+                        "Este pago se confirma automáticamente desde la terminal Point.",
+                        type="info",
+                        position="top",
+                    )
+            return
         folio = folio_input.value.strip() if folio_input else ""
         await database_web.aprobar_pago_terminal_async(
             venta["id_transaccion"], folio, usuario_actual()
@@ -238,10 +250,10 @@ async def admin_operativo():
                     position="top",
                 )
         await vista_operativo.refresh()
-        notificar_kiosko(
-            "El pago fue cancelado. Puedes intentar de nuevo.", "warning"
-        )
+        notificar_kiosko("El pago fue cancelado. Puedes intentar de nuevo.", "warning")
 
     await vista_operativo()
     registrar_callback_operativo(vista_operativo.refresh)
-    page_client.on_disconnect(lambda: remover_callback_operativo(vista_operativo.refresh))
+    page_client.on_disconnect(
+        lambda: remover_callback_operativo(vista_operativo.refresh)
+    )

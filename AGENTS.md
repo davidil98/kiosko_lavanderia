@@ -9,18 +9,23 @@ This is a **Python/NiceGUI web application** for a laundromat kiosk (EcoLuna). I
 
 ### Key Paths
 ```
-src/web_app/main.py         # Main NiceGUI app entry point
-src/web_app/models.py       # State management (KioskoState dataclass)
-src/web_app/database_web.py # Async SQLite operations
-src/web_app/hardware.py     # GPIO control for machines/coins
-src/web_app/metodos_pago.py # Strategy pattern for payment methods (monedas, terminal)
-tools/                      # Hardware test scripts and MercadoPago reference tools
-tools/test_voltaje*.py      # GPIO hardware diagnostic scripts
-tools/mp_dev/               # MercadoPago integration reference scripts
-data/ecoluna_datos.db       # SQLite database file
-media/                      # Static assets (logos, images, icons/)
-media/icons/                # SVG icons (used instead of emojis for Pi compat)
-agent_notation/             # Internal agent notes and TODOs
+src/web_app/main.py                # Main NiceGUI app entry point
+src/web_app/models.py              # State management (KioskoState dataclass)
+src/web_app/database_web.py        # Async SQLite operations
+src/web_app/hardware.py            # GPIO control for machines/coins
+src/web_app/metodos_pago.py        # Strategy pattern for payment methods (monedas, point)
+src/web_app/services/notifications.py  # State + admin/kiosko notification registry
+src/web_app/services/mercadopago.py    # HTTP client for Mercado Pago Point API
+src/web_app/services/point_polling.py  # Background polling task for Point orders
+src/web_app/components/            # UI components (kiosko/, admin/, shared.py)
+src/web_app/pages/                 # NiceGUI page handlers (kiosko, admin_login, admin_*)
+tools/                             # Hardware test scripts and MercadoPago reference tools
+tools/test_voltaje*.py             # GPIO hardware diagnostic scripts
+tools/mp_dev/                      # MercadoPago integration reference scripts
+data/ecoluna_datos.db              # SQLite database file
+media/                             # Static assets (logos, images, icons/)
+media/icons/                       # SVG icons (used instead of emojis for Pi compat)
+agent_notation/                    # Internal agent notes and TODOs
 ```
 
 ---
@@ -257,8 +262,48 @@ def seleccionar_servicio(self, servicio_nombre: str):
 Create `.env` in project root (not committed to git):
 
 ```
-BYPASS_PASSWORD=admin123   # Password for courtesy/bypass service and admin confirmations
+BYPASS_PASSWORD=admin123                      # Password for courtesy/bypass service and admin confirmations
+MP_ENVIRONMENT=prod                            # 'prod' or 'test'
+MP_PROD_TOKEN=APP_USR-...                      # Mercado Pago production token
+MP_TEST_TOKEN=APP_USR-...                      # Mercado Pago test token
+MP_TERMINAL_ID=NEWLAND_N950__N950NCC904817363  # Unique Point terminal ID
 ```
+
+## Integración Mercado Pago Point
+
+Cobro automático en terminal Point. El kiosko envía la orden a la terminal física; el cliente paga y el sistema confirma sin intervención del operador.
+
+### Flujo
+1. Cliente selecciona servicio → ingresa peso → admin valida → elige **Punto Point**.
+2. Kiosko llama `services/mercadopago.crear_orden_point()` con `asyncio.to_thread` (no bloquea el event loop).
+3. Si éxito: orden pasa a `Pendiente-peso` → `Procesando-pago` → `Pendiente-pago` con `modalidad=autoservicio-point` o `personalizado-point` y `mp_order_id` poblado.
+4. Kiosko muestra pantalla de espera "Procesando pago con Point".
+5. `services/point_polling.py` vigila cada orden con `mp_order_id` no vacío. Polling cada 5s.
+6. Al detectar `status="paid"`:
+   - `aprobar_pago_terminal_async` con `folio = data.transactions.payments[0].id` (folio automático, no manual).
+   - `numero_transaccion_terminal` se guarda con ese id.
+   - Kiosko notificado → avanza a pantalla de éxito.
+7. Si expira (5 min default) o se cancela en MP: orden local se borra, kiosko notificado y devuelto a métodos de pago.
+
+### Cancelación manual
+- **La terminal NEWLAND N950 no responde a cancelaciones por API**. Hay que cancelar manualmente en la terminal.
+- El kiosko intenta `mercadopago.cancelar_orden()` best-effort cuando el cliente presiona "Regresar", pero si falla, debe hacerse en la terminal física.
+- El operador también puede cancelar desde `/admin/operativo` con el botón existente (la terminal quedará con la orden encolada hasta cancelar manualmente).
+
+### Selección de terminal
+- Por ahora solo hay una terminal: `MP_TERMINAL_ID=NEWLAND_N950__N950NCC904817363` (hardcoded en `.env`).
+- Si en el futuro hay varias, agregar selector en `/admin/settings` que liste con `listar_terminales()`.
+
+### Archivos
+- `services/mercadopago.py` — cliente HTTP (crear_orden_point, consultar_orden, cancelar_orden, listar_terminales)
+- `services/point_polling.py` — tarea de fondo `iniciar_polling()` / `detener_polling()`
+- `services/point_polling.py:_extraer_pago_id` — extrae `transactions.payments[0].id` para guardarlo como folio
+- `database_web.py` — columna `mp_order_id` (migración automática), `obtener_ordenes_point_pendientes_async`, `guardar_mp_order_id_async`, `obtener_mp_order_id_async`
+- `metodos_pago.py` — `MetodoTerminalPoint` ahora es "Punto Point" (no "Terminal Point"); usa `mercadopago.crear_orden_point`
+- `components/kiosko/paso_peso.py` — rama de espera "Procesando pago con Point"
+- `components/admin/operativo_seccion.py` — tarjeta Point sin botón "Confirmar" (es automático)
+- `pages/admin_operativo.py` — `confirmar_pago` rechaza confirmaciones manuales de Point
+- `components/shared.py:badge_metodo_pago` — badge "Point" en azul
 
 ---
 

@@ -17,9 +17,7 @@ def render_esperando_peso(v, on_aprobar, on_rechazar):
     )
 
     with (
-        ui.element("div")
-        .classes("orden-card")
-        .style(f"border-left:4px solid {color};")
+        ui.element("div").classes("orden-card").style(f"border-left:4px solid {color};")
     ):
         with ui.element("div").style("flex:1;min-width:0;"):
             ui.html(
@@ -46,16 +44,20 @@ def render_esperando_peso(v, on_aprobar, on_rechazar):
 
 
 def render_procesando_pago(v, on_confirmar, on_cancelar):
-    """Tarjeta para orden con pago pendiente (mostrador o terminal)."""
+    """Tarjeta para orden con pago pendiente (mostrador, terminal o Point)."""
     nombre = v.get("nombre_cliente") or "Sin nombre"
     peso = v.get("peso_kg", 0) or 0
     monto = v.get("monto_pagado", 0) or 0
     modalidad = v.get("modalidad", "")
     es_pendiente_pago = v["estado"] == "Pendiente-pago"
+    es_point = "point" in modalidad
 
     if "pendiente-pago" in modalidad or "mostrador" in modalidad:
         label = "Efectivo mostrador"
         color = "#16a34a"
+    elif "point" in modalidad:
+        label = "Point"
+        color = "#3b82f6"
     elif "terminal" in modalidad:
         label = "Terminal"
         color = "#f59e0b"
@@ -65,9 +67,7 @@ def render_procesando_pago(v, on_confirmar, on_cancelar):
 
     folio_input = None
     with (
-        ui.element("div")
-        .classes("orden-card")
-        .style(f"border-left:4px solid {color};")
+        ui.element("div").classes("orden-card").style(f"border-left:4px solid {color};")
     ):
         with ui.element("div").style("flex:1;min-width:0;"):
             ui.html(
@@ -79,7 +79,7 @@ def render_procesando_pago(v, on_confirmar, on_cancelar):
             ui.html(
                 f'<div class="orden-meta">{v["fecha_hora"]} · {peso} kg · Monto: <strong>${monto}</strong></div>'
             )
-            if es_pendiente_pago:
+            if es_pendiente_pago and not es_point:
                 folio_input = (
                     ui.input("Folio de transacción (opcional)")
                     .props("outlined dense")
@@ -88,18 +88,23 @@ def render_procesando_pago(v, on_confirmar, on_cancelar):
         with ui.element("div").style(
             "flex-shrink:0;display:flex;flex-direction:column;gap:8px;align-items:flex-end;"
         ):
-            if es_pendiente_pago:
+            if es_point:
+                ui.html(
+                    '<div style="font-size:0.82rem;color:#1e40af;font-weight:600;">'
+                    "Esperando pago en terminal Point...</div>"
+                )
+            elif es_pendiente_pago:
                 ui.label("✓ Confirmar pago").classes("btn-maquina btn-iniciar").on(
                     "click",
                     lambda e, venta=v, inp=folio_input: asyncio.create_task(
                         on_confirmar(venta, inp)
                     ),
                 )
-                ui.label("✕ Cancelar").classes("btn-maquina btn-pausar").on(
-                    "click",
-                    lambda e, venta=v: asyncio.create_task(on_cancelar(venta)),
-                )
-            elif v["estado"] == "Procesando-pago":
+            if v["estado"] == "Procesando-pago" and not es_pendiente_pago:
                 ui.html(
                     '<div style="font-size:0.82rem;color:#64748b;">Esperando pago en kiosko...</div>'
                 )
+            ui.label("✕ Cancelar").classes("btn-maquina btn-pausar").on(
+                "click",
+                lambda e, venta=v: asyncio.create_task(on_cancelar(venta)),
+            )

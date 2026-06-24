@@ -51,6 +51,7 @@ def init_db():
         ("modalidad", "TEXT    DEFAULT 'autoservicio'"),
         ("numero_transaccion_terminal", "TEXT    DEFAULT ''"),
         ("validado_por", "TEXT    DEFAULT ''"),
+        ("mp_order_id", "TEXT    DEFAULT ''"),
     ]
     cursor.execute("PRAGMA table_info(transacciones)")
     cols_existentes = {row[1] for row in cursor.fetchall()}
@@ -426,7 +427,7 @@ async def cancelar_pago_pendiente_async(id_transaccion, usuario):
     await run_in_executor(_cancelar_pago_pendiente, id_transaccion, usuario)
 
 
-def _marcar_pendiente_pago(id_transaccion, monto, modalidad=None):
+def _marcar_pendiente_pago(id_transaccion, monto, modalidad=None, mp_order_id=None):
     """Convierte una orden 'Procesando-pago' en 'Pendiente-pago'.
     Si no se indica modalidad, se deriva automáticamente como {base}-terminal."""
     conn = _get_connection()
@@ -439,24 +440,87 @@ def _marcar_pendiente_pago(id_transaccion, monto, modalidad=None):
         row = cursor.fetchone()
         base = row[0].split("-")[0] if row and row[0] else "autoservicio"
         modalidad = f"{base}-terminal"
-    cursor.execute(
-        """
-        UPDATE transacciones
-        SET estado = 'Pendiente-pago', monto_pagado = ?, modalidad = ?
-        WHERE id_transaccion = ? AND estado = 'Procesando-pago'
-    """,
-        (monto, modalidad, id_transaccion),
-    )
+    if mp_order_id is not None:
+        cursor.execute(
+            """
+            UPDATE transacciones
+            SET estado = 'Pendiente-pago', monto_pagado = ?, modalidad = ?, mp_order_id = ?
+            WHERE id_transaccion = ? AND estado = 'Procesando-pago'
+        """,
+            (monto, modalidad, mp_order_id, id_transaccion),
+        )
+    else:
+        cursor.execute(
+            """
+            UPDATE transacciones
+            SET estado = 'Pendiente-pago', monto_pagado = ?, modalidad = ?
+            WHERE id_transaccion = ? AND estado = 'Procesando-pago'
+        """,
+            (monto, modalidad, id_transaccion),
+        )
     actualizado = cursor.rowcount > 0
     conn.commit()
     conn.close()
     return id_transaccion if actualizado else None
 
 
-async def marcar_pendiente_pago_async(id_transaccion, monto, modalidad=None):
+async def marcar_pendiente_pago_async(
+    id_transaccion, monto, modalidad=None, mp_order_id=None
+):
     return await run_in_executor(
-        _marcar_pendiente_pago, id_transaccion, monto, modalidad
+        _marcar_pendiente_pago, id_transaccion, monto, modalidad, mp_order_id
     )
+
+
+def _obtener_ordenes_point_pendientes():
+    """Órdenes 'Pendiente-pago' con mp_order_id asignado (esperando pago en Point)."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM transacciones "
+        "WHERE estado = 'Pendiente-pago' AND mp_order_id != '' "
+        "ORDER BY id_transaccion ASC"
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+
+async def obtener_ordenes_point_pendientes_async():
+    return await run_in_executor(_obtener_ordenes_point_pendientes)
+
+
+def _guardar_mp_order_id(id_transaccion, mp_order_id):
+    """Guarda el id de la orden Point en una fila recién creada (fallback)."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE transacciones SET mp_order_id = ? WHERE id_transaccion = ?",
+        (mp_order_id, id_transaccion),
+    )
+    conn.commit()
+    conn.close()
+
+
+async def guardar_mp_order_id_async(id_transaccion, mp_order_id):
+    await run_in_executor(_guardar_mp_order_id, id_transaccion, mp_order_id)
+
+
+def _obtener_mp_order_id(id_transaccion):
+    """Devuelve el mp_order_id de una transacción, o ''."""
+    conn = _get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT mp_order_id FROM transacciones WHERE id_transaccion = ?",
+        (id_transaccion,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row[0] if row else ""
+
+
+async def obtener_mp_order_id_async(id_transaccion):
+    return await run_in_executor(_obtener_mp_order_id, id_transaccion)
 
 
 def _guardar_pago_orden(id_transaccion, metodo, monto, ingresado, cambio, modalidad):

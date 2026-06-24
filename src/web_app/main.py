@@ -8,6 +8,7 @@ import database_web
 import hardware
 from services.hardware_hooks import lector_monedas
 from services.db_lifecycle import _recuperar_maquinas_sostenidas
+from services.point_polling import iniciar_polling, detener_polling
 
 # Configuración de archivos estáticos
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,9 +22,11 @@ app.add_static_files("/static", STATIC_DIR)
 database_web.init_db()
 app.on_startup(lector_monedas.start)
 app.on_startup(_recuperar_maquinas_sostenidas)
+app.on_startup(iniciar_polling)
 hardware.init_gpio_lavadoras()
 
 app.on_shutdown(hardware.limpiar_pines)
+app.on_shutdown(detener_polling)
 
 # Registro automático de páginas vía import
 import pages.kiosko  # noqa: E402

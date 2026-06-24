@@ -13,11 +13,12 @@ import requests
 from pathlib import Path
 from dotenv import load_dotenv
 
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(PROJECT_ROOT / ".env")
+print(PROJECT_ROOT / ".env")
 
 BASE_URL = "https://api.mercadopago.com"
-ENVIRONMENT = os.getenv("MP_ENVIRONMENT", "test").lower()
+ENVIRONMENT = os.getenv("MP_ENVIRONMENT", "prod").lower()
 
 
 def _token() -> str:

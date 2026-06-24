@@ -19,9 +19,7 @@ def render_user_chip(dialogo_cambio=None):
 
 
 def badge_servicio(tipo):
-    cls = (
-        "badge-lavar" if "Lavar" in tipo or "Autolavado" in tipo else "badge-secar"
-    )
+    cls = "badge-lavar" if "Lavar" in tipo or "Autolavado" in tipo else "badge-secar"
     return f'<span class="orden-servicio-badge {cls}">{tipo}</span>'
 
 
@@ -29,7 +27,10 @@ def badge_metodo_pago(modalidad):
     if not modalidad:
         return ""
     m = modalidad
-    if "terminal" in m:
+    if "point" in m:
+        color_bg, color_fg = "#dbeafe", "#1e40af"
+        label = "Point"
+    elif "terminal" in m:
         color_bg, color_fg = "#fce7f3", "#be185d"
         label = "Terminal"
     elif "monedas" in m:
