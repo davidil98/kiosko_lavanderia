@@ -4,6 +4,18 @@ from typing import Optional, Callable, TYPE_CHECKING
 if TYPE_CHECKING:
     from models import KioskoState
 
+from models import calcular_precio
+
+
+def _precio_total(state) -> int:
+    """Precio total dinámico. Si hay segmentación, usa esa; si no, el servicio."""
+    item = getattr(state, "get_item_cobro", lambda: None)()
+    if not item:
+        if not state.servicio_seleccionado:
+            return 0
+        item = state.servicio_seleccionado
+    return calcular_precio(item, state.peso_ingresado)
+
 
 class ResultadoPago:
     """Estandariza el resultado de cualquier intento de pago."""
@@ -45,7 +57,7 @@ class MetodoMonedas(MetodoPago):
     async def procesar_pago(self) -> ResultadoPago:
         return ResultadoPago(
             exito=True,
-            datos={"monto": self.state.servicio_seleccionado.precio},
+            datos={"monto": _precio_total(self.state)},
         )
 
     def render_panel(self, on_cancelar, on_pago_exitoso):
@@ -65,17 +77,11 @@ class MetodoMonedas(MetodoPago):
                 f'<p style="font-size:0.82rem;color:#64748b;margin:0 0 10px;">Peso: <strong style="color:#93c5fd;">{self.state.peso_ingresado} kg</strong></p>'
             )
 
+            precio_total = _precio_total(self.state)
             faltante = self.state.get_faltante()
             pct = (
-                min(
-                    100,
-                    int(
-                        self.state.dinero_ingresado
-                        / self.state.servicio_seleccionado.precio
-                        * 100
-                    ),
-                )
-                if self.state.servicio_seleccionado.precio > 0
+                min(100, int(self.state.dinero_ingresado / precio_total * 100))
+                if precio_total > 0
                 else 100
             )
 
@@ -83,7 +89,7 @@ class MetodoMonedas(MetodoPago):
                 ui.html('<div class="monto-label">Falta por insertar</div>')
                 ui.html(f'<div class="monto-valor">${faltante}</div>')
                 ui.html(
-                    f'<div class="monto-sub">Ingresado ${self.state.dinero_ingresado} de ${self.state.servicio_seleccionado.precio}</div>'
+                    f'<div class="monto-sub">Ingresado ${self.state.dinero_ingresado} de ${precio_total}</div>'
                 )
 
             ui.html(
@@ -146,9 +152,7 @@ class MetodoTerminalPoint(MetodoPago):
 
             with ui.element("div").classes("monto-box"):
                 ui.html('<div class="monto-label">Total a pagar</div>')
-                ui.html(
-                    f'<div class="monto-valor">${state.servicio_seleccionado.precio}</div>'
-                )
+                ui.html(f'<div class="monto-valor">${_precio_total(state)}</div>')
                 ui.html(
                     '<div class="monto-sub">Al continuar, se enviará la orden a la terminal Point</div>'
                 )
@@ -160,7 +164,7 @@ class MetodoTerminalPoint(MetodoPago):
                         type="negative",
                     )
                     return
-                monto = state.servicio_seleccionado.precio
+                monto = _precio_total(state)
                 descripcion = f"EcoLuna - {state.servicio_seleccionado.nombre}"
                 ref = f"ECOLUNA_KIOSKO_{state.ultimo_id_transaccion}"
 

@@ -1,7 +1,7 @@
 from nicegui import ui, app
 import nicegui as _ng
 import database_web
-from services.auth import esta_autenticado, usuario_actual
+from services.auth import esta_autenticado, usuario_actual, es_superadmin
 from services.notifications import (
     registrar_callback_operativo,
     remover_callback_operativo,
@@ -111,6 +111,43 @@ async def admin_dashboard():
                         '<div class="dash-card-sub">Tablero kanban de lavado, secado y doblado</div>'
                     )
 
+                with (
+                    ui.element("div")
+                    .classes("dash-card")
+                    .on("click", lambda: ui.navigate.to("/admin/cortes"))
+                ):
+                    with ui.element("div").classes("dash-card-icon"):
+                        ui.image("/media/icons/ticket.svg").style(
+                            "width:64px;height:64px;object-fit:contain;"
+                        )
+                    ui.html('<div class="dash-card-title">Cortes de Caja</div>')
+                    ui.html(
+                        '<div class="dash-card-sub">Apertura, movimientos y cierre de caja</div>'
+                    )
+
+                if es_superadmin():
+                    with (
+                        ui.element("div")
+                        .classes("dash-card")
+                        .on("click", lambda: ui.navigate.to("/admin/superadmin"))
+                    ):
+                        with ui.element("div").classes("dash-card-icon"):
+                            ui.image("/media/icons/gear.svg").style(
+                                "width:64px;height:64px;object-fit:contain;"
+                            )
+                        ui.html(
+                            '<div class="dash-card-title" '
+                            'style="display:flex;align-items:center;justify-content:center;gap:8px;">'
+                            "Superadmin"
+                            '<span class="badge" style="background:#fef3c7;color:#92400e;font-size:0.7rem;padding:2px 8px;">'
+                            "MOI/DAVID"
+                            "</span></div>"
+                        )
+                        ui.html(
+                            '<div class="dash-card-sub">Configuración de '
+                            "servicios, segmentaciones y calculadora</div>"
+                        )
+
     def cerrar_sesion():
         app.storage.user["authenticated"] = False
         app.storage.user["usuario"] = ""
@@ -121,4 +158,6 @@ async def admin_dashboard():
 
     await contenido_dashboard()
     registrar_callback_operativo(contenido_dashboard.refresh)
-    page_client.on_disconnect(lambda: remover_callback_operativo(contenido_dashboard.refresh))
+    page_client.on_disconnect(
+        lambda: remover_callback_operativo(contenido_dashboard.refresh)
+    )

@@ -428,3 +428,271 @@ with ui.element('div').classes('dash-card-icon'):
 
 ### Documentación detallada
 Ver `agent_notation/icons_todo.md` para mapeo completo por línea y consejos de implementación.
+
+---
+
+## Roles y Superadministrador
+
+- `Moi` y `David`: **superadmins** (acceso a `/admin/superadmin` y al CRUD de servicios).
+- `Capi`: admin normal (operativo, autoservicio, personalizado; no ve el superadmin).
+- Definido en `src/web_app/services/auth.py:SUPERADMINS`.
+- `es_superadmin()` consulta el usuario actual de la sesión.
+
+## Servicios Data-Driven (catálogo en DB)
+
+Desde esta branch, el catálogo de servicios **vive en la tabla `servicios`** de SQLite en vez de estar hardcoded en `models.py`. El kiosko lee en cada render y los cambios se reflejan al instante.
+
+### Tabla `servicios`
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `id` | INTEGER PK | |
+| `codigo` | TEXT UNIQUE | Identificador lógico (`autolavado`, `secado`, `pers_ropa`, `pers_edredon`) |
+| `nombre` | TEXT | Visible al cliente |
+| `modalidad` | TEXT | `autoservicio` o `personalizado` |
+| `icono` | TEXT | Path SVG |
+| `tipo_calculo` | TEXT | `fijo`, `por_kg`, `por_duracion` |
+| `precio_fijo` | INTEGER | Para `fijo` y `por_duracion` |
+| `tarifa_por_kg` | REAL | Para `por_kg` |
+| `duracion_min` | INTEGER | Duración estimada del ciclo |
+| `limite_kg` | INTEGER | NULL = sin límite |
+| `tipos_equipo` | TEXT | CSV de tipos: `mixto,lavado,secado` |
+| `orden` | INTEGER | Posición en pantalla |
+| `activo` | INTEGER | 0/1, soft delete |
+
+Seed inicial: 4 servicios (Autolavado $45 fijo, Secado $50 fijo, Pers-Ropa $30/kg, Pers-Edredones $150 fijo). Solo se inserta si la tabla está vacía.
+
+### Funciones clave
+
+- `cargar_servicios(solo_activos=True) -> list[ServicioInfo]` — recarga cada vez que se llama.
+- `get_servicio_por_codigo(codigo) -> ServicioInfo | None` — para `state.seleccionar_servicio(codigo)`.
+- `calcular_precio(servicio, peso_kg) -> int` — devuelve el precio final según `tipo_calculo`.
+- `database_web.listar_servicios_async()`, `obtener_servicio_por_codigo_async()`, `actualizar_servicio_async()`.
+
+### Compatibilidad
+
+`SERVICIOS_AUTO`, `SERVICIOS_PERSONALIZADO` y `SERVICIOS` ahora son **funciones** (callables) que invocan `cargar_servicios()`. El código que hacía `from models import SERVICIOS_AUTO` debe usar `SERVICIOS_AUTO()` o migrar a `cargar_servicios()`. `state.seleccionar_servicio(nombre)` cambió a `state.seleccionar_servicio(codigo)`.
+
+## Estado del branch
+
+- ✅ Segment 1: Servicios data-driven sin CRUD.
+- ✅ Segment 2: Tabla `segmentaciones` y nuevo paso en kiosko.
+- ✅ Segment 3: CRUD de servicios y segmentaciones en `/admin/superadmin`.
+- ✅ Segment 4: Tabla `maquinas` y `hardware.py` data-driven.
+- ✅ Segment 4.5: Respaldo de fábrica (default snapshot).
+- ✅ Segment 5: Métricas con Highcharts en `/admin/superadmin`.
+- ✅ Segment 6: Cortes de caja en `/admin/cortes`.
+
+## Cortes de Caja
+
+Ruta: `/admin/cortes`. Accesible para **todos los admins autenticados**. Tarjeta en el dashboard admin para todos.
+
+### Tablas
+
+- `cortes_caja` — el ciclo de apertura/cierre con saldo inicial, real, esperado y diferencia.
+- `movimientos_caja` — todos los ingresos y egresos manuales y automáticos.
+
+### Flujo
+
+1. **Abrir caja** (solo superadmin + `BYPASS_PASSWORD`): se registra saldo inicial.
+2. **Movimientos durante el turno**: cualquier admin/socio/superadmin registra ingresos o egresos con tipo, monto y concepto predefinido. No requiere `BYPASS_PASSWORD`.
+3. **Cerrar caja** (solo superadmin + `BYPASS_PASSWORD`): se ingresa el efectivo contado, sistema calcula esperado vs real, guarda diferencia y notas.
+4. **Historial**: tabla de cortes cerrados con sus datos y notas.
+
+### Auto-registro
+
+Cuando un admin confirma un pago en efectivo desde el panel operativo (`confirmar_pago` con modalidad `pendiente-pago` o `mostrador`), el sistema crea automáticamente un movimiento de **ingreso** en el corte activo, con el monto y la descripción del servicio. Esto evita que el operador tenga que registrar manualmente cada pago de personalizado. Los **cambios** dados al cliente se siguen registrando manualmente como egreso "Cambio a cliente".
+
+### Archivos
+
+- `database_web.py` — tablas `cortes_caja` y `movimientos_caja` con índices, 6 helpers (`obtener_corte_activo`, `abrir_corte`, `cerrar_corte`, `listar_cortes`, `registrar_movimiento`, `listar_movimientos`).
+- `pages/admin_cortes.py` — la página completa con 3 secciones.
+- `pages/admin_operativo.py` — auto-registro de movimiento al confirmar pago mostrador.
+- `pages/admin_dashboard.py` — tarjeta "Cortes de Caja" para todos los admins.
+
+## Métricas con Highcharts
+
+Tab "Métricas" en `/admin/superadmin`. Usa `nicegui_highcharts` (instalado en el venv). Filtro de rango arriba: "Todo el historial", "Últimos 7 días", "Último mes", "Últimos 3 meses", "Último año".
+
+### KPIs (cards superiores)
+
+4 métricas globales: órdenes totales, recaudado, kilos lavados, promedio kg/orden.
+
+### Gráficos
+
+1. **Uso por máquina** — pie chart, número de servicios por `id_equipo`.
+2. **Horas pico del día** — column chart, 24 buckets (00:00-23:00).
+3. **Días pico de la semana** — column chart, 7 buckets (Dom-Sáb).
+4. **Consumo promedio por servicio** — bar chart con doble eje Y (kg prom y monto prom).
+5. **Tasa de uso efectivo vs tarjeta** — stacked column por mes. Mapeo: `monedas`→Efectivo, `point`→Tarjeta (Point), `terminal`→Tarjeta (Terminal), `pendiente-pago`/`mostrador`→Efectivo (mostrador).
+
+### Helpers en `database_web.py`
+
+- `reporte_uso_por_maquina_async(desde, hasta)` — `[{id_equipo, n_servicios, total_kg, total_min}]`
+- `reporte_horas_pico_async(desde, hasta)` — 24 buckets `[{hora, n}]`
+- `reporte_dias_pico_async(desde, hasta)` — 7 buckets `[{dow, nombre, n}]`
+- `reporte_consumo_promedio_async(desde, hasta)` — `[{tipo_servicio, n, kg_prom, kg_total, monto_prom, monto_total}]`
+- `reporte_tasa_pago_async(desde, hasta)` — `[{mes, Efectivo, Tarjeta (Point), Tarjeta (Terminal), Efectivo (mostrador), n, monto_total}]`
+- `reporte_resumen_async(desde, hasta)` — `{n_orden, recaudado, kg_total, kg_prom}`
+
+Las funciones aceptan fechas como string `YYYY-MM-DD` o vacío para "todo el historial". Filtra automáticamente estados no finalizados (`Pendiente-peso`).
+
+## Respaldo de fábrica (default snapshot)
+
+El primer `init_db()` guarda un snapshot automático de los catálogos data-driven (`servicios`, `segmentaciones`, `maquinas`) en la tabla `_backup_default`. El superadmin puede:
+
+- **Crear respaldo ahora**: sobrescribe el snapshot con el estado actual. Útil cuando ya configuraste el catálogo a tu gusto y quieres que ese sea el nuevo "punto de retorno".
+- **Restaurar valores por defecto**: borra el estado actual de los 3 catálogos y los reemplaza con el snapshot. Las órdenes históricas **no** se tocan. Requiere `BYPASS_PASSWORD`.
+
+### Tabla `_backup_default`
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `tabla` | TEXT PK | `servicios`, `segmentaciones` o `maquinas` |
+| `datos` | TEXT (JSON) | Snapshot serializado de todas las filas |
+| `created_at` | TEXT | Fecha del último respaldo |
+| `nota` | TEXT | Motivo (ej. "Respaldo manual") |
+
+### Helpers en `database_web.py`
+
+- `listar_backups_async()` — devuelve metadata de los 3 snapshots.
+- `obtener_backup_async(tabla)` — devuelve el dict completo con `datos: list[dict]`.
+- `crear_backup_async(tabla, nota)` — sobrescribe el snapshot de una tabla.
+- `crear_backup_completo_async(nota)` — sobrescribe los 3.
+- `restaurar_backup_async(tabla) -> (ok, n_filas)` — borra y reinserta.
+- `restaurar_backup_completo_async()` — restaura los 3.
+
+## Máquinas (catálogo de hardware)
+
+El catálogo de máquinas (lavadoras, secadoras) vive en la tabla `maquinas` de SQLite. `hardware.EQUIPOS` se carga de la DB al primer acceso y se cachea en memoria.
+
+### Tabla `maquinas`
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `id` | INTEGER PK | |
+| `codigo` | TEXT UNIQUE | Identificador lógico (`lavasecadora_1`) |
+| `nombre` | TEXT | Visible al admin |
+| `tipo` | TEXT | `mixto` / `lavado` / `secado` / `doblado` |
+| `capacidad_kg` | INTEGER | Capacidad de carga |
+| `gpio` | INTEGER | Pin BCM en la Raspberry |
+| `modo` | TEXT | `pulso` (0.5s) o `sostenido` (HIGH continuo) |
+| `duracion_max_min` | INTEGER | Tiempo máx. de seguridad para modo sostenido |
+| `orden` | INTEGER | Posición en panel |
+| `activa` | INTEGER | 0/1, soft delete |
+
+Seed inicial: 4 máquinas (lavasecadora 1-3 + secadora 1). Solo se inserta si la tabla está vacía.
+
+### API de hardware.py
+
+`EQUIPOS` ahora es un **proxy dinámico** que lee del cache:
+
+```python
+# Antes (sigue funcionando):
+eq = hardware.EQUIPOS["lavasecadora_1"]
+for codigo, eq in hardware.EQUIPOS.items():
+    ...
+
+# Nuevo: forzar recarga desde la DB tras editar
+hardware.recargar_equipos()
+```
+
+- `get_equipos() -> dict` — devuelve el cache, lo carga de la DB si está vacío.
+- `recargar_equipos() -> dict` — fuerza recarga (llamar después de editar desde el superadmin).
+
+**Importante:** al agregar una nueva máquina con un GPIO diferente, **reiniciar el kiosko** para que `init_gpio_lavadoras()` haga el setup del pin. El sistema avisa de esto en el `ui.notify` tras crear.
+
+### Validación de GPIO
+
+La DB no enforce unique en GPIO (puede haber dos máquinas con el mismo GPIO si una está desactivada). La validación la hace la UI al crear/editar (`existe_gpio_async(gpio, id_excluir)`). La UI muestra el error antes de intentar el UPDATE.
+
+### CRUD en `/admin/superadmin`
+
+Tab **Máquinas** (entre Segmentaciones y Calculadora). Botones:
+
+- **+ Crear máquina** — diálogo con código, nombre, tipo, GPIO, capacidad, modo, duración máx sostenido. Valida GPIO duplicado y código único.
+- **✎ Editar** — diálogo con todos los campos, incluye checkbox de activa.
+- **⏸/▶ Activar/Desactivar** — soft delete.
+- **🗑 Eliminar** — diálogo de confirmación con `BYPASS_PASSWORD`. Hard delete solo si no hay órdenes históricas con esa máquina; si las hay, devuelve `False` y se debe desactivar.
+
+### Archivos
+
+- `database_web.py` — tabla `maquinas` con migración, helpers (`listar_maquinas_async`, `obtener_maquina_por_codigo_async`, `crear_maquina_async`, `actualizar_maquina_async`, `eliminar_maquina_hard_async`, `existe_gpio_async`).
+- `hardware.py` — `EQUIPOS` como proxy dinámico, `get_equipos()`, `recargar_equipos()`. El resto del código no requiere cambios porque la API del dict se mantiene.
+- `pages/admin_superadmin.py` — tab Máquinas con CRUD completo.
+
+## Panel Superadministrador
+
+Ruta: `/admin/superadmin`. Acceso restringido con `redirigir_si_no_superadmin()` (solo `Moi` y `David`). Visible como tarjeta en el dashboard admin cuando el usuario actual es superadmin.
+
+### Tabs
+
+1. **Servicios y Tarifas**: lista los 4 servicios con su tipo de cálculo, precio, duración, límite y tipos de equipo. Botones:
+   - **✎ Editar**: abre un diálogo con todos los campos editables y un preview en vivo del precio. Requiere `BYPASS_PASSWORD` para confirmar.
+   - **⏸/▶ Activar/Desactivar**: soft delete, no afecta órdenes históricas.
+
+2. **Segmentaciones**: agrupa por servicio, lista todas las segmentaciones. Editar/activar con el mismo patrón.
+
+3. **Calculadora**: herramienta de preview que simula el precio de un servicio o segmentación con un peso dado. Útil para responderle al cliente en mostrador. Disponible también para admins normales (útil para cualquier operador).
+
+### Segunda barrera
+
+Todos los cambios (servicios y segmentaciones) requieren confirmar con la contraseña de bypass (`BYPASS_PASSWORD`, default `admin123`). Si la contraseña no coincide, se muestra una notificación negativa y no se aplica el cambio.
+
+### Cambios al instante
+
+El kiosko y el panel operativo leen la DB en cada render, por lo que cualquier cambio en servicios/segmentaciones se refleja al instante. No requiere reiniciar el kiosko.
+
+### Estructura
+
+- `src/web_app/pages/admin_superadmin.py` — la página completa con sus 3 tabs.
+- `src/web_app/pages/admin_dashboard.py` — agrega la tarjeta "Superadmin" condicional.
+- `src/web_app/services/auth.py:redirigir_si_no_superadmin()` — guarda de acceso.
+
+## Segmentaciones (catálogo anidado)
+
+Una segmentación es una **variante** dentro de un servicio. Ejemplos:
+- "Personalizado – Ropa" tiene "Lava + Seca + Dobla", "Solo Lava + Exprime", "Lava + Seca".
+- "Personalizado – Edredones" tiene "Lava + Seca", "Solo Lavado".
+
+### Tabla `segmentaciones`
+
+| Columna | Tipo | Descripción |
+|---|---|---|
+| `id` | INTEGER PK | |
+| `servicio_id` | INTEGER FK | Referencia a `servicios.id` (CASCADE) |
+| `codigo` | TEXT | Identificador lógico único por servicio |
+| `nombre` | TEXT | Visible al cliente |
+| `descripcion` | TEXT | Texto explicativo |
+| `tipo_calculo` | TEXT | `fijo` / `por_kg` / `por_duracion` |
+| `precio_fijo` | INTEGER | Para `fijo` y `por_duracion` |
+| `tarifa_por_kg` | REAL | Para `por_kg` |
+| `duracion_min` | INTEGER | Duración estimada |
+| `orden` | INTEGER | Posición en pantalla |
+| `activo` | INTEGER | 0/1, soft delete |
+
+UNIQUE(`servicio_id`, `codigo`). Seed inicial: 3 segmentaciones para `pers_ropa` y 2 para `pers_edredon`.
+
+### Flujo del kiosko
+
+1. Cliente selecciona servicio en paso 0.
+2. Ingresa peso en paso 2.
+3. **Si el servicio tiene segmentaciones**, paso 2.5 muestra las opciones con precio calculado en vivo.
+4. Cliente elige segmentación → paso 3 (métodos de pago).
+5. **Si el servicio NO tiene segmentaciones**, va directo de paso 2 a paso 3.
+
+### Cálculo de precio
+
+`calcular_precio(item, peso_kg)` funciona idéntico para `ServicioInfo` y `SegmentacionInfo`. La función `state.get_item_cobro()` devuelve la segmentación si está seleccionada, si no el servicio.
+
+### Helpers en `models.py`
+
+- `SegmentacionInfo` (dataclass).
+- `cargar_segmentaciones(servicio_id=None, solo_activos=True) -> list[SegmentacionInfo]`.
+- `get_segmentacion_por_id(id_seg) -> SegmentacionInfo | None`.
+- `format_precio(item, peso_kg) -> str` — formato visual (`$45` o `$30/kg`).
+
+### En el admin
+
+Cuando se completa el pago, `finalizar_pago` concatena el nombre de la segmentación al `tipo_servicio` (ej. "Personalizado – Ropa · Lava + Seca + Dobla") para que el admin lo vea en sus tarjetas.
+Ver `agent_notation/icons_todo.md` para mapeo completo por línea y consejos de implementación.

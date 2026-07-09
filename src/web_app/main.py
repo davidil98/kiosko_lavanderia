@@ -35,13 +35,15 @@ import pages.admin_dashboard  # noqa: E402
 import pages.admin_operativo  # noqa: E402
 import pages.admin_autoservicio  # noqa: E402
 import pages.admin_personalizado  # noqa: E402
+import pages.admin_superadmin  # noqa: E402
+import pages.admin_cortes  # noqa: E402
 
 if __name__ in {"__main__", "__mp_main__"}:
     try:
         ui.run(
             title="EcoLuna Kiosko",
             port=8000,
-            favicon="../media/logo_slogan.png",
+            favicon="media/logo_slogan.png",
             reload=False,
             show=False,
             storage_secret="ecoluna_kiosko_secret_2025",
