@@ -483,6 +483,13 @@ Seed inicial: 4 servicios (Autolavado $45 fijo, Secado $50 fijo, Pers-Ropa $30/k
 - ✅ Segment 5: Métricas con Highcharts en `/admin/superadmin`.
 - ✅ Segment 6: Cortes de caja en `/admin/cortes`.
 
+## Estado final (merged to main)
+
+Rama `feature/servicios-db-driven` mergeada con `--no-ff`. 3 commits en main:
+1. `7604399` — Cortes de caja (lógica + UI).
+2. `9f3d963` — Fix RuntimeWarning y favicon data URL.
+3. `f9870c4` — Merge commit.
+
 ## Cortes de Caja
 
 Ruta: `/admin/cortes`. Accesible para **todos los admins autenticados**. Tarjeta en el dashboard admin para todos.
