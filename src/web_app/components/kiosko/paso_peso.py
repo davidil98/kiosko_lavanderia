@@ -2,6 +2,7 @@ import asyncio
 from nicegui import ui
 from metodos_pago import METODOS_PAGO_DISPONIBLES
 import database_web
+from models import cargar_segmentaciones, calcular_precio
 from services.notifications import state, notificar_admin, notificar_kiosko
 
 
@@ -26,11 +27,11 @@ async def _kiosko_regresar_espera(kiosko_ui_ref):
         state.peso_ingresado = 0.0
         state.peso_en_revision = 0.0
         state.paso_actual = 2
+        state.mostrando_segmentaciones = False
         state.mostrando_metodos_pago = False
         state.limpiar_espera_admin()
         notificar_admin()
     elif state.motivo_espera == "pago" and state.ultimo_id_transaccion:
-        # Si hay una orden Point activa, intentar cancelar por API (best effort)
         if state.metodo_pago_codigo == "point":
             mp_id = await database_web.obtener_mp_order_id_async(
                 state.ultimo_id_transaccion
@@ -55,22 +56,29 @@ async def seleccionar_metodo_pago(metodo_cls, kiosko_ui_ref):
         kiosko_ui_ref()
 
 
+async def seleccionar_segmentacion_handler(id_segmentacion, kiosko_ui_ref):
+    state.seleccionar_segmentacion(id_segmentacion)
+    if kiosko_ui_ref:
+        kiosko_ui_ref()
+
+
 async def finalizar_servicio_personalizado():
     if state.ultimo_id_transaccion is None:
         notificar_kiosko(
             "No hay una orden activa. Vuelve a ingresar el peso.", tipo="negative"
         )
         return
+    precio = calcular_precio(state.get_item_cobro(), state.peso_ingresado)
     id_orden = await database_web.marcar_pendiente_pago_async(
         state.ultimo_id_transaccion,
-        state.servicio_seleccionado.precio,
+        precio,
         modalidad="personalizado-pendiente-pago",
     )
     if id_orden is None:
         id_orden = await database_web.registrar_venta_pendiente_terminal_async(
             servicio=state.servicio_seleccionado.nombre,
             peso_kg=state.peso_ingresado,
-            monto=state.servicio_seleccionado.precio,
+            monto=precio,
             nombre_cliente=state.nombre_cliente,
             duracion=state.servicio_seleccionado.duracion_min,
             modalidad="personalizado-pendiente-pago",
@@ -84,6 +92,8 @@ async def finalizar_servicio_personalizado():
 def render_paso_peso(kiosko_ui_ref):
     if state.esperando_aprobacion_admin:
         _render_esperando_admin(kiosko_ui_ref)
+    elif state.mostrando_segmentaciones:
+        _render_segmentaciones(kiosko_ui_ref)
     elif state.mostrando_metodos_pago:
         _render_metodos_pago(kiosko_ui_ref)
     else:
@@ -130,6 +140,80 @@ def _render_esperando_admin(kiosko_ui_ref):
     ui.button(
         "\u2190 Regresar",
         on_click=lambda: asyncio.create_task(_kiosko_regresar_espera(kiosko_ui_ref)),
+    ).classes("btn-confirmar-nombre max-w-xs mx-auto mt-6").style("background:#334155;")
+
+
+def _render_segmentaciones(kiosko_ui_ref):
+    """Paso 2.5: el cliente elige la segmentación del servicio."""
+    if not state.servicio_seleccionado:
+        state.mostrando_segmentaciones = False
+        kiosko_ui_ref()
+        return
+    segmentaciones = cargar_segmentaciones(
+        servicio_id=state.servicio_seleccionado.id, solo_activos=True
+    )
+    if not segmentaciones:
+        # Si el servicio no tiene segmentaciones, salta directo a métodos de pago
+        state.mostrando_segmentaciones = False
+        state.mostrando_metodos_pago = True
+        kiosko_ui_ref()
+        return
+
+    ui.html(
+        f'<p class="instruccion">Elige la opción para '
+        f"<strong>{state.servicio_seleccionado.nombre}</strong></p>"
+    )
+    ui.html(
+        f'<div style="text-align:center;font-size:0.85rem;color:#94a3b8;margin-bottom:18px;">'
+        f'Peso registrado: <strong style="color:#e2e8f0;">{state.peso_ingresado} kg</strong>'
+        f"</div>"
+    )
+
+    with ui.element("div").style(
+        "display:flex; gap:18px; flex-wrap:wrap; justify-content:center;"
+    ):
+        for seg in segmentaciones:
+            precio = calcular_precio(seg, state.peso_ingresado)
+            with (
+                ui.element("div")
+                .classes("card-servicio")
+                .style("max-width:240px;")
+                .on(
+                    "click",
+                    lambda sid=seg.id: asyncio.create_task(
+                        seleccionar_segmentacion_handler(sid, kiosko_ui_ref)
+                    ),
+                )
+            ):
+                ui.html(
+                    f'<span style="font-size:1.1rem;font-weight:800;color:#e2e8f0;">{seg.nombre}</span>'
+                )
+                if seg.descripcion:
+                    ui.html(
+                        f'<span style="font-size:0.78rem;color:#94a3b8;text-align:center;">{seg.descripcion}</span>'
+                    )
+                if seg.tipo_calculo == "por_kg":
+                    ui.html(
+                        f'<span style="font-size:0.78rem;color:#64748b;">'
+                        f"${int(seg.tarifa_por_kg)}/kg × {state.peso_ingresado}kg = "
+                        f'<strong style="color:#3b82f6;font-size:1.4rem;">${precio}</strong></span>'
+                    )
+                else:
+                    ui.html(
+                        f'<span style="font-size:1.5rem;font-weight:800;color:#3b82f6;">${precio}</span>'
+                    )
+                if seg.duracion_min:
+                    ui.html(
+                        f'<span style="font-size:0.72rem;color:#64748b;">≈ {seg.duracion_min} min</span>'
+                    )
+
+    ui.button(
+        "\u2190 Volver a pesar",
+        on_click=lambda: (
+            setattr(state, "mostrando_segmentaciones", False),
+            setattr(state, "peso_ingresado", 0.0),
+            kiosko_ui_ref(),
+        ),
     ).classes("btn-confirmar-nombre max-w-xs mx-auto mt-6").style("background:#334155;")
 
 
@@ -221,6 +305,7 @@ def _render_ingreso_peso(kiosko_ui_ref):
             )
 
         display_peso = ui.label("0 kg").classes("numpad-display")
+        preview_precio = ui.html("")
 
         def presionar_num(d):
             v = peso_buffer["val"]
@@ -237,6 +322,25 @@ def _render_ingreso_peso(kiosko_ui_ref):
             peso_buffer["val"] = v
             state.peso_ingresado = float(v) if v not in ("", ".") else 0.0
             display_peso.set_text(f"{v} kg")
+            _actualizar_preview()
+
+        def _actualizar_preview():
+            if (
+                state.servicio_seleccionado
+                and state.servicio_seleccionado.tipo_calculo == "por_kg"
+            ):
+                precio = calcular_precio(
+                    state.servicio_seleccionado, state.peso_ingresado
+                )
+                preview_precio.set_content(
+                    f'<div style="text-align:center;margin-top:14px;padding:10px;background:#1e293b;border-radius:8px;">'
+                    f'<span style="color:#94a3b8;font-size:0.78rem;">Precio estimado: </span>'
+                    f'<span style="color:#3b82f6;font-size:1.3rem;font-weight:800;">${precio}</span>'
+                    f'<span style="color:#64748b;font-size:0.7rem;"> (${int(state.servicio_seleccionado.tarifa_por_kg)}/kg × {state.peso_ingresado}kg)</span>'
+                    f"</div>"
+                )
+            else:
+                preview_precio.set_content("")
 
         with ui.element("div").classes("numpad mx-auto mt-2").style("max-width:280px;"):
             for d in [
@@ -262,6 +366,8 @@ def _render_ingreso_peso(kiosko_ui_ref):
                     f"numpad-btn {color} text-white font-bold"
                 )
 
+        _actualizar_preview()
+
         async def enviar_peso_a_revision():
             if state.peso_ingresado <= 0:
                 notificar_kiosko(
@@ -278,6 +384,7 @@ def _render_ingreso_peso(kiosko_ui_ref):
                 state.peso_ingresado = 0.0
                 peso_buffer["val"] = "0"
                 display_peso.set_text("0 kg")
+                _actualizar_preview()
                 return
             nuevo_id = await database_web.registrar_venta_pendiente_peso_async(
                 servicio=state.servicio_seleccionado.nombre,

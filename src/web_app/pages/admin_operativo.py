@@ -216,6 +216,25 @@ async def admin_operativo():
             state.procesar_exito(venta["id_transaccion"])
         else:
             state.procesar_exito(venta["id_transaccion"])
+
+        # Auto-registrar movimiento de caja si es un pago en efectivo de mostrador
+        # (modalidad contiene 'pendiente-pago' o 'mostrador')
+        if "pendiente-pago" in modalidad or "mostrador" in modalidad:
+            corte = await database_web.obtener_corte_activo_async()
+            if corte is not None:
+                await database_web.registrar_movimiento_async(
+                    corte_id=corte["id"],
+                    tipo="ingreso",
+                    monto=int(venta.get("monto_pagado") or 0),
+                    concepto=(
+                        f"Pago en mostrador — {venta.get('tipo_servicio', '')} "
+                        f"Orden #{venta['id_transaccion']}"
+                    ),
+                    usuario=usuario_actual(),
+                    notas=folio or "",
+                    auto=1,
+                )
+
         notificar_admin()
         cl = _client()
         if cl:

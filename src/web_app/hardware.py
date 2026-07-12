@@ -78,39 +78,81 @@ class LectorMonedas:
 
 
 # --- Lavadoras y Secadoras ---
-# Modificar aquí para añadir, quitar o cambiar máquinas.
-# tipo: 'mixto' = lava y seca | 'lavado' = solo lava | 'secado' = solo seca
-# modo: 'pulso' = HIGH 0.5s (optoacoplador) | 'sostenido' = HIGH continuo hasta apagado
-EQUIPOS = {
-    "lavasecadora_1": {
-        "nombre": "Lavasecadora 1",
-        "tipo": "mixto",
-        "capacidad_kg": 5,
-        "gpio": 17,
-        "modo": "pulso",
-    },
-    "lavasecadora_2": {
-        "nombre": "Lavasecadora 2",
-        "tipo": "mixto",
-        "capacidad_kg": 5,
-        "gpio": 18,
-        "modo": "pulso",
-    },
-    "lavasecadora_3": {
-        "nombre": "Lavasecadora 3",
-        "tipo": "mixto",
-        "capacidad_kg": 5,
-        "gpio": 4,
-        "modo": "sostenido",
-    },
-    "secadora_1": {
-        "nombre": "Secadora 1",
-        "tipo": "secado",
-        "capacidad_kg": 5,
-        "gpio": 23,
-        "modo": "sostenido",
-    },
-}
+# El catálogo de máquinas vive en la tabla `maquinas` de SQLite.
+# Esta función carga la lista activa y la cachea en memoria para que el
+# resto del código pueda consumir `EQUIPOS` como un dict clásico.
+# Para forzar recarga (tras editar máquinas desde el superadmin), usa
+# recargar_equipos().
+_EQUIPOS_CACHE: dict = {}
+
+
+def _cargar_equipos_desde_db() -> dict:
+    """Lee todas las máquinas activas de la DB y devuelve un dict {codigo: {...}}."""
+    try:
+        import database_web
+
+        maquinas = database_web._listar_maquinas(solo_activas=True)
+    except Exception as e:
+        # Si la DB aún no está lista (import-time), devolvemos dict vacío
+        print(f"[hardware] No se pudo cargar maquinas: {e}")
+        return {}
+    return {
+        m["codigo"]: {
+            "nombre": m["nombre"],
+            "tipo": m["tipo"],
+            "capacidad_kg": m["capacidad_kg"],
+            "gpio": m["gpio"],
+            "modo": m["modo"],
+        }
+        for m in maquinas
+    }
+
+
+def get_equipos() -> dict:
+    """Devuelve el dict de equipos, cargándolo de la DB si está vacío."""
+    global _EQUIPOS_CACHE
+    if not _EQUIPOS_CACHE:
+        _EQUIPOS_CACHE = _cargar_equipos_desde_db()
+    return _EQUIPOS_CACHE
+
+
+def recargar_equipos() -> dict:
+    """Fuerza recarga del catálogo de máquinas desde la DB."""
+    global _EQUIPOS_CACHE
+    _EQUIPOS_CACHE = _cargar_equipos_desde_db()
+    return _EQUIPOS_CACHE
+
+
+# Backward-compat: EQUIPOS como propiedad dinámica.
+# `hardware.EQUIPOS['lavasecadora_1']` sigue funcionando, pero los cambios
+# del superadmin se reflejan al llamar recargar_equipos().
+class _EquiposProxy:
+    def __getitem__(self, key):
+        return get_equipos()[key]
+
+    def __iter__(self):
+        return iter(get_equipos())
+
+    def __len__(self):
+        return len(get_equipos())
+
+    def __contains__(self, key):
+        return key in get_equipos()
+
+    def keys(self):
+        return get_equipos().keys()
+
+    def values(self):
+        return get_equipos().values()
+
+    def items(self):
+        return get_equipos().items()
+
+    def get(self, key, default=None):
+        return get_equipos().get(key, default)
+
+
+EQUIPOS = _EquiposProxy()
 
 # Tiempos máximos de seguridad para equipos en modo sostenido (minutos)
 DURACION_MAXIMA_SOSTENIDO_MIN = {

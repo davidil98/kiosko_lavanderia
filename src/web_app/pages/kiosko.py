@@ -23,20 +23,32 @@ from components.kiosko.paso_exito import render_paso_exito
 
 
 async def finalizar_pago():
+    from models import calcular_precio
+
     metodo = state.metodo_pago_codigo or "monedas"
     es_pers = state.servicio_seleccionado.modalidad == "personalizado"
     modalidad = f"personalizado-{metodo}" if es_pers else f"autoservicio-{metodo}"
-    ingresado = (
-        state.dinero_ingresado
-        if metodo == "monedas"
-        else state.servicio_seleccionado.precio
-    )
-    cambio = state.get_cambio() if metodo == "monedas" else 0
+    # Si hay segmentación seleccionada, se cobra esa; si no, el servicio.
+    item = state.get_item_cobro() or state.servicio_seleccionado
+    precio_final = calcular_precio(item, state.peso_ingresado)
+    ingresado = state.dinero_ingresado if metodo == "monedas" else precio_final
+    cambio = max(0, state.dinero_ingresado - precio_final) if metodo == "monedas" else 0
+
+    # Si hay segmentación, registrarla como prefijo en el nombre del servicio
+    # para que el admin la vea en el panel.
+    tipo_servicio = state.servicio_seleccionado.nombre
+    if state.segmentacion_seleccionada:
+        tipo_servicio = f"{tipo_servicio} · {state.segmentacion_seleccionada.nombre}"
+
+    if state.ultimo_id_transaccion:
+        await database_web.actualizar_tipo_servicio_async(
+            state.ultimo_id_transaccion, tipo_servicio
+        )
 
     nuevo_id = await database_web.guardar_pago_orden_async(
         state.ultimo_id_transaccion,
         metodo,
-        state.servicio_seleccionado.precio,
+        precio_final,
         ingresado,
         cambio,
         modalidad,
@@ -50,6 +62,11 @@ async def finalizar_pago():
         )
         state.reset()
         return
+
+    state.procesar_exito(nuevo_id)
+    notificar_admin()
+    await asyncio.sleep(7)
+    state.reset()
 
     state.procesar_exito(nuevo_id)
     notificar_admin()
