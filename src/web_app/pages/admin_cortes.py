@@ -14,7 +14,7 @@ from components.admin.header import render_admin_header
 
 
 @ui.page("/admin/cortes")
-def admin_cortes():
+async def admin_cortes():
     if redirigir_si_no_autenticado():
         return
 
@@ -32,10 +32,10 @@ def admin_cortes():
     )
 
     with ui.element("div").props("id=admin-content"):
-        _render_pagina(page_client)
+        await _render_pagina(page_client)
 
 
-def _render_pagina(page_client):
+async def _render_pagina(page_client):
     @ui.refreshable
     async def vista_completa():
         corte = await database_web.obtener_corte_activo_async()
@@ -46,7 +46,7 @@ def _render_pagina(page_client):
         ui.html('<div style="height:24px;"></div>')
         await _render_historial()
 
-    vista_completa()
+    await vista_completa()
 
 
 def _render_sin_caja(page_client):
@@ -76,14 +76,13 @@ def _render_sin_caja(page_client):
         )
 
 
-def _render_caja_abierta(corte, page_client):
+async def _render_caja_abierta(corte, page_client):
     """Caja abierta: resumen, movimientos, botón de cerrar."""
 
     @ui.refreshable
     async def resumen():
         corte_actual = await database_web.obtener_corte_activo_async()
         if not corte_actual:
-            vista_completa = ui.context.client.element
             return
         movs = await database_web.listar_movimientos_async(corte_actual["id"])
         ingresos = sum(m["monto"] for m in movs if m["tipo"] == "ingreso")
@@ -123,7 +122,7 @@ def _render_caja_abierta(corte, page_client):
         ui.html(
             '<div class="orden-numero" style="margin-bottom:6px;">Resumen de caja</div>'
         )
-        resumen()
+        await resumen()
         with ui.row().classes("w-full gap-2 mt-3 justify-end"):
             ui.button(
                 "🔄 Refrescar",
@@ -165,7 +164,7 @@ def _render_caja_abierta(corte, page_client):
                 "➕ Registrar movimiento",
                 on_click=lambda: _abrir_dialog_movimiento(corte, page_client),
             ).props("color=primary size=sm")
-        tabla_movimientos()
+        await tabla_movimientos()
 
     def _render_tabla_movimientos_inner():
         tabla_movimientos.refresh()

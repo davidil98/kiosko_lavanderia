@@ -1,5 +1,6 @@
 from nicegui import ui, app
 import os
+import base64
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,6 +14,18 @@ from services.point_polling import iniciar_polling, detener_polling
 # Configuración de archivos estáticos
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 MEDIA_DIR = os.path.join(BASE_DIR, "media")
+
+
+def _favicon_data_url() -> str:
+    """Convierte el logo a data URL para que NiceGUI lo use como favicon."""
+    logo_path = os.path.join(MEDIA_DIR, "logo_slogan.png")
+    if not os.path.exists(logo_path):
+        return "🌙"
+    with open(logo_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+    return f"data:image/png;base64,{b64}"
+
+
 STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 
 app.add_static_files("/media", MEDIA_DIR)
@@ -43,7 +56,7 @@ if __name__ in {"__main__", "__mp_main__"}:
         ui.run(
             title="EcoLuna Kiosko",
             port=8000,
-            favicon="media/logo_slogan.png",
+            favicon=_favicon_data_url(),
             reload=False,
             show=False,
             storage_secret="ecoluna_kiosko_secret_2025",
