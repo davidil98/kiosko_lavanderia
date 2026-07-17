@@ -2,14 +2,27 @@
 
 Levanta el servidor NiceGUI en `http://localhost:8000`.
 
-Uso:
-    python main.py            # producción (en la Pi con hardware)
-    python main.py test       # modo test (sin GPIO)
+Uso (cualquiera de las 3 formas funciona, gracias al sys.path inyectado):
+    cd src/app && python main.py            # producción (en la Pi con hardware)
+    cd src/app && python main.py test       # modo test (sin GPIO)
+    cd src     && python -m app.main         # equivalente
+    cd src     && python -m app.main test    # equivalente en modo test
+    python src/app/main.py                   # también desde la raíz del repo
+    python src/app/main.py test              # idem en modo test
 """
+
+# Asegurar que el paquete `app` sea importable cuando se ejecute como
+# `python main.py` desde `src/app/`. Python agrega el directorio del script
+# a sys.path, no el padre. Esta línea fuerza que `src/` esté disponible.
+import sys
+from pathlib import Path as _Path
+
+_SRC = _Path(__file__).resolve().parent.parent  # src/app/main.py → src/
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 
 import asyncio
 import base64
-import sys
 from pathlib import Path
 
 from nicegui import app, ui

@@ -123,12 +123,20 @@ grep -rE "SELECT|INSERT|UPDATE|DELETE" src/app/core src/app/ui src/app/adaptador
 
 ### Ejecutar la app
 
-```bash
-# Modo producción (en la Raspberry Pi con hardware)
-cd src/app && python main.py
+Hay 3 formas equivalentes (todas funcionan gracias a que `main.py` agrega `src/` a `sys.path` automáticamente):
 
-# Modo test (sin GPIO, simula monedas con teclado)
-cd src/app && python main.py test
+```bash
+# Forma 1: desde src/app (la más intuitiva)
+cd src/app && python main.py             # producción (en la Pi con hardware)
+cd src/app && python main.py test        # modo test (sin GPIO)
+
+# Forma 2: desde src con módulo (usada por CI / smoke tests)
+cd src && python -m app.main
+cd src && python -m app.main test
+
+# Forma 3: desde la raíz del proyecto
+python src/app/main.py
+python src/app/main.py test
 ```
 
 En modo test, las teclas `1`/`2`/`5`/`0` simulan monedas de $1/$2/$5/$10.
