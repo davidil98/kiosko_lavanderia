@@ -59,17 +59,6 @@ async def admin_operativo():
         ) + contadores.get(EstadoOrden.PROCESANDO_PAGO.value, 0)
 
         with ui.element("div").props("id=admin-content"):
-            ui.html(
-                '<h2 style="font-size:1.5rem;font-weight:800;color:#1e293b;'
-                'margin-bottom:6px;display:flex;align-items:center;gap:10px;">'
-                '<img src="/media/icons/inbox.svg" style="width:32px;height:32px;">'
-                "Panel Operativo</h2>"
-            )
-            ui.html(
-                f'<p style="color:#64748b;margin-bottom:24px;">'
-                f"Aprueba pesos y confirma pagos en mostrador. Operador: <strong>{usuario}</strong>.</p>"
-            )
-
             ordenes_peso = await transacciones.listar_pendientes_operativo()
             solo_peso = [
                 o
@@ -133,11 +122,29 @@ async def admin_operativo():
                 f"(peso: {peso_pend} · pago: {pago_pend})</div>"
             )
 
-            # Botón de bypass
-            with ui.row().classes("w-full justify-end mt-4"):
-                ui.button("Servicio de cortesía", icon="star", on_click=_abrir_bypass)
+    # Header estático: NO se re-renderiza con el timer. Solo se refresca
+    # la lista de órdenes (contenido) sin perder el scroll del usuario.
+    with ui.element("div").props("id=admin-content"):
+        ui.html(
+            '<h2 style="font-size:1.5rem;font-weight:800;color:#1e293b;'
+            'margin-bottom:6px;display:flex;align-items:center;gap:10px;">'
+            '<img src="/media/icons/inbox.svg" style="width:32px;height:32px;">'
+            "Panel Operativo</h2>"
+        )
+        ui.html(
+            f'<p style="color:#64748b;margin-bottom:24px;">'
+            f"Aprueba pesos y confirma pagos en mostrador. Operador: <strong>{usuario}</strong>.</p>"
+        )
+        # El contenido refrescable va en su propio contenedor.
+        with ui.element("div").props("id=operativo-contenido"):
+            await contenido()
+        with ui.row().classes("w-full justify-end mt-4"):
+            ui.button("Servicio de cortesía", icon="star", on_click=_abrir_bypass)
 
-    await contenido()
+    # El timer solo refresca el contenido (la lista de tarjetas), no
+    # el header ni el botón de bypass. Así el scroll del usuario se
+    # preserva porque la posición de scroll está asociada al contenedor
+    # padre, no al hijo refrescable.
     ui.timer(3.0, contenido.refresh)
 
     boton_cerrar_sesion()

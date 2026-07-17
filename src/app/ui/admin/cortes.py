@@ -30,21 +30,24 @@ async def admin_cortes():
     @ui.refreshable
     async def contenido() -> None:
         corte = await core_cortes.obtener_activo_async()
-        with ui.element("div").props("id=admin-content"):
-            ui.html(
-                '<h2 style="font-size:1.5rem;font-weight:800;color:#1e293b;'
-                'margin-bottom:6px;display:flex;align-items:center;gap:10px;">'
-                '<img src="/media/icons/ticket.svg" style="width:32px;height:32px;">'
-                "Cortes de Caja</h2>"
-            )
-            if corte is None:
-                _render_sin_caja()
-            else:
-                await _render_caja_abierta(corte)
-            ui.html('<div style="height:24px;"></div>')
-            await _render_historial()
+        if corte is None:
+            _render_sin_caja()
+        else:
+            await _render_caja_abierta(corte)
+        ui.html('<div style="height:24px;"></div>')
+        await _render_historial()
 
-    await contenido()
+    # Header estático fuera del refreshable.
+    with ui.element("div").props("id=admin-content"):
+        ui.html(
+            '<h2 style="font-size:1.5rem;font-weight:800;color:#1e293b;'
+            'margin-bottom:6px;display:flex;align-items:center;gap:10px;">'
+            '<img src="/media/icons/ticket.svg" style="width:32px;height:32px;">'
+            "Cortes de Caja</h2>"
+        )
+        with ui.element("div").props("id=cortes-contenido"):
+            await contenido()
+
     ui.timer(3.0, contenido.refresh)
     boton_cerrar_sesion()
 

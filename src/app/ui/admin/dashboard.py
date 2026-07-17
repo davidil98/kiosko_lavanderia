@@ -49,79 +49,79 @@ async def admin_dashboard():
         en_proceso_auto = contadores.get("En proceso", 0)
         total_auto = asignar_auto + en_proceso_auto
 
-        with ui.element("div").props("id=admin-content"):
-            ui.html(
-                '<h2 style="font-size:1.5rem;font-weight:800;color:#1e293b;'
-                'margin-bottom:6px;display:flex;align-items:center;gap:10px;">'
-                '<img src="/media/icons/wave.svg" style="width:32px;height:32px;">'
-                "Bienvenido</h2>"
+        with ui.element("div").classes("dash-grid"):
+            render_tarjeta_dashboard(
+                TarjetaDashboard(
+                    icono="/media/icons/inbox.svg",
+                    titulo="Panel Operativo",
+                    subtitulo=(
+                        f"Aprobar pesos ({pendiente_peso}) · "
+                        f"Confirmar pagos ({pendiente_pago})"
+                    ),
+                    badge=str(urgente_total) if urgente_total else None,
+                    href="/admin/operativo",
+                ),
+                super,
             )
-            ui.html(
-                f'<p style="color:#64748b;margin-bottom:32px;">Selecciona el '
-                f"módulo de trabajo, <strong>{usuario}</strong>.</p>"
+            render_tarjeta_dashboard(
+                TarjetaDashboard(
+                    icono="/media/icons/leaf.svg",
+                    titulo="Autoservicio",
+                    subtitulo=(
+                        f"Asignar ({asignar_auto}) · En proceso ({en_proceso_auto})"
+                    ),
+                    badge=str(total_auto) if total_auto else None,
+                    badge_color=("#92400e", "#fef3c7"),
+                    href="/admin/autoservicio",
+                ),
+                super,
+            )
+            render_tarjeta_dashboard(
+                TarjetaDashboard(
+                    icono="/media/icons/shirt.svg",
+                    titulo="Servicio Personalizado",
+                    subtitulo="Tablero kanban de lavado, secado y doblado",
+                    href="/admin/personalizado",
+                ),
+                super,
+            )
+            render_tarjeta_dashboard(
+                TarjetaDashboard(
+                    icono="/media/icons/ticket.svg",
+                    titulo="Cortes de Caja",
+                    subtitulo="Apertura, movimientos y cierre de caja",
+                    href="/admin/cortes",
+                ),
+                super,
+            )
+            render_tarjeta_dashboard(
+                TarjetaDashboard(
+                    icono="/media/icons/gear.svg",
+                    titulo="Superadmin",
+                    subtitulo=(
+                        "Configuración de servicios, segmentaciones y calculadora"
+                    ),
+                    href="/admin/superadmin",
+                    superadmin_only=True,
+                ),
+                super,
             )
 
-            with ui.element("div").classes("dash-grid"):
-                render_tarjeta_dashboard(
-                    TarjetaDashboard(
-                        icono="/media/icons/inbox.svg",
-                        titulo="Panel Operativo",
-                        subtitulo=(
-                            f"Aprobar pesos ({pendiente_peso}) · "
-                            f"Confirmar pagos ({pendiente_pago})"
-                        ),
-                        badge=str(urgente_total) if urgente_total else None,
-                        href="/admin/operativo",
-                    ),
-                    super,
-                )
-                render_tarjeta_dashboard(
-                    TarjetaDashboard(
-                        icono="/media/icons/leaf.svg",
-                        titulo="Autoservicio",
-                        subtitulo=(
-                            f"Asignar ({asignar_auto}) · En proceso ({en_proceso_auto})"
-                        ),
-                        badge=str(total_auto) if total_auto else None,
-                        badge_color=("#92400e", "#fef3c7"),
-                        href="/admin/autoservicio",
-                    ),
-                    super,
-                )
-                render_tarjeta_dashboard(
-                    TarjetaDashboard(
-                        icono="/media/icons/shirt.svg",
-                        titulo="Servicio Personalizado",
-                        subtitulo="Tablero kanban de lavado, secado y doblado",
-                        href="/admin/personalizado",
-                    ),
-                    super,
-                )
-                render_tarjeta_dashboard(
-                    TarjetaDashboard(
-                        icono="/media/icons/ticket.svg",
-                        titulo="Cortes de Caja",
-                        subtitulo="Apertura, movimientos y cierre de caja",
-                        href="/admin/cortes",
-                    ),
-                    super,
-                )
-                render_tarjeta_dashboard(
-                    TarjetaDashboard(
-                        icono="/media/icons/gear.svg",
-                        titulo="Superadmin",
-                        subtitulo=(
-                            "Configuración de servicios, segmentaciones y calculadora"
-                        ),
-                        href="/admin/superadmin",
-                        superadmin_only=True,
-                    ),
-                    super,
-                )
+    # Header estático fuera del refreshable.
+    with ui.element("div").props("id=admin-content"):
+        ui.html(
+            '<h2 style="font-size:1.5rem;font-weight:800;color:#1e293b;'
+            'margin-bottom:6px;display:flex;align-items:center;gap:10px;">'
+            '<img src="/media/icons/wave.svg" style="width:32px;height:32px;">'
+            "Bienvenido</h2>"
+        )
+        ui.html(
+            f'<p style="color:#64748b;margin-bottom:32px;">Selecciona el '
+            f"módulo de trabajo, <strong>{usuario}</strong>.</p>"
+        )
+        with ui.element("div").props("id=dashboard-contenido"):
+            await contenido()
 
-    await contenido()
-
-    # Refresco automático cada 5 segundos para mantener los contadores frescos
+    # El timer solo refresca las tarjetas (los contadores), no el header.
     ui.timer(5.0, contenido.refresh)
-
     boton_cerrar_sesion()

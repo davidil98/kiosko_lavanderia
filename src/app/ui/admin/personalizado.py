@@ -50,37 +50,38 @@ async def admin_personalizado():
                 etapa = EtapaKanban.RECIBIDO
             por_etapa.setdefault(etapa, []).append(o)
 
-        with ui.element("div").props("id=admin-content"):
-            ui.html(
-                '<h2 style="font-size:1.5rem;font-weight:800;color:#1e293b;'
-                'margin-bottom:6px;display:flex;align-items:center;gap:10px;">'
-                '<img src="/media/icons/shirt.svg" style="width:32px;height:32px;">'
-                "Servicio Personalizado</h2>"
-            )
-            ui.html(
-                f'<p style="color:#64748b;margin-bottom:24px;">'
-                f"Mueve las órdenes por las 3 etapas. Operador: <strong>{usuario}</strong>.</p>"
-            )
+        with ui.element("div").style(
+            "display:grid;grid-template-columns:repeat(3, 1fr);gap:18px;"
+        ):
+            for etapa, icono, titulo in ETAPAS:
+                with ui.element("div").classes("kanban-col"):
+                    ui.html(
+                        f'<div class="kanban-col-header">'
+                        f'<img src="/media/icons/{icono}.svg" '
+                        f'style="width:20px;height:20px;vertical-align:middle;margin-right:6px;">'
+                        f"{titulo}"
+                        f'<span class="badge" style="margin-left:auto;">{len(por_etapa[etapa])}</span>'
+                        f"</div>"
+                    )
+                    for o in por_etapa[etapa]:
+                        _render_kanban_card(o)
 
-            with ui.element("div").style(
-                "display:grid;grid-template-columns:repeat(3, 1fr);gap:18px;"
-            ):
-                for etapa, icono, titulo in ETAPAS:
-                    with ui.element("div").classes("kanban-col"):
-                        ui.html(
-                            f'<div class="kanban-col-header">'
-                            f'<img src="/media/icons/{icono}.svg" '
-                            f'style="width:20px;height:20px;vertical-align:middle;margin-right:6px;">'
-                            f"{titulo}"
-                            f'<span class="badge" style="margin-left:auto;">{len(por_etapa[etapa])}</span>'
-                            f"</div>"
-                        )
-                        for o in por_etapa[etapa]:
-                            _render_kanban_card(o)
+    # Header estático fuera del refreshable.
+    with ui.element("div").props("id=admin-content"):
+        ui.html(
+            '<h2 style="font-size:1.5rem;font-weight:800;color:#1e293b;'
+            'margin-bottom:6px;display:flex;align-items:center;gap:10px;">'
+            '<img src="/media/icons/shirt.svg" style="width:32px;height:32px;">'
+            "Servicio Personalizado</h2>"
+        )
+        ui.html(
+            f'<p style="color:#64748b;margin-bottom:24px;">'
+            f"Mueve las órdenes por las 3 etapas. Operador: <strong>{usuario}</strong>.</p>"
+        )
+        with ui.element("div").props("id=personalizado-contenido"):
+            await contenido()
 
-    await contenido()
     ui.timer(3.0, contenido.refresh)
-
     boton_cerrar_sesion()
 
 

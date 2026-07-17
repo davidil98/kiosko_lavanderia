@@ -46,48 +46,50 @@ async def admin_autoservicio():
         ]
         en_proceso = [o for o in pendientes if o["estado"] == "En proceso"]
 
-        with ui.element("div").props("id=admin-content"):
-            ui.html(
-                '<h2 style="font-size:1.5rem;font-weight:800;color:#1e293b;'
-                'margin-bottom:6px;display:flex;align-items:center;gap:10px;">'
-                '<img src="/media/icons/leaf.svg" style="width:32px;height:32px;">'
-                "Autoservicio</h2>"
+        def _render_pendiente(o: dict) -> None:
+            tarjeta_orden(
+                o,
+                [
+                    AccionTarjeta(
+                        label="⚙ Asignar máquina",
+                        color="primary",
+                        handler=_abrir_asignar,
+                    ),
+                ],
             )
-            ui.html(
-                f'<p style="color:#64748b;margin-bottom:24px;">'
-                f"Asigna máquina y dispara el ciclo. Operador: <strong>{usuario}</strong>.</p>"
+
+        def _render_proceso(o: dict) -> None:
+            tarjeta_orden(
+                o,
+                [
+                    AccionTarjeta(
+                        label="✓ Marcar completado",
+                        color="positive",
+                        handler=_completar,
+                    ),
+                ],
             )
 
-            def _render_pendiente(o: dict) -> None:
-                tarjeta_orden(
-                    o,
-                    [
-                        AccionTarjeta(
-                            label="⚙ Asignar máquina",
-                            color="primary",
-                            handler=_abrir_asignar,
-                        ),
-                    ],
-                )
+        render_seccion("leaf", "Por asignar", por_asignar, _render_pendiente)
+        render_seccion("gear", "En proceso", en_proceso, _render_proceso)
 
-            def _render_proceso(o: dict) -> None:
-                tarjeta_orden(
-                    o,
-                    [
-                        AccionTarjeta(
-                            label="✓ Marcar completado",
-                            color="positive",
-                            handler=_completar,
-                        ),
-                    ],
-                )
+    # Header estático fuera del refreshable: no se re-renderiza con el
+    # timer, así no se regresa el scroll al inicio.
+    with ui.element("div").props("id=admin-content"):
+        ui.html(
+            '<h2 style="font-size:1.5rem;font-weight:800;color:#1e293b;'
+            'margin-bottom:6px;display:flex;align-items:center;gap:10px;">'
+            '<img src="/media/icons/leaf.svg" style="width:32px;height:32px;">'
+            "Autoservicio</h2>"
+        )
+        ui.html(
+            f'<p style="color:#64748b;margin-bottom:24px;">'
+            f"Asigna máquina y dispara el ciclo. Operador: <strong>{usuario}</strong>.</p>"
+        )
+        with ui.element("div").props("id=autoservicio-contenido"):
+            await contenido()
 
-            render_seccion("leaf", "Por asignar", por_asignar, _render_pendiente)
-            render_seccion("gear", "En proceso", en_proceso, _render_proceso)
-
-    await contenido()
     ui.timer(3.0, contenido.refresh)
-
     boton_cerrar_sesion()
 
 
