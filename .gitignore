@@ -2,9 +2,10 @@
 __pycache__
 .env
 ecoluna_datos.db
+data/
 .DS_Store
 *.code-workspace
 agent_notation
-AGENTS.md
 .nicegui
 .ruff_cache
+.opencode/

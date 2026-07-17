@@ -1,223 +1,258 @@
-# Kiosko de Lavandería EcoLuna 🌙🫧
+# EcoLuna Kiosko — Sistema de cobro y operación 🌙🫧
 
-Este proyecto es el sistema central de administración, cobro y control de hardware para la Lavandería EcoLuna. Ha evolucionado de una interfaz local a una **Arquitectura Web (Headless)**, diseñada para separar el flujo de cobro del cliente y el panel de control del administrador, operando desde una Raspberry Pi.
+Sistema central de administración, cobro y control de hardware para la **Lavandería EcoLuna**. Diseñado para correr en una **Raspberry Pi** como cerebro local de la operación.
 
-El sistema controla directamente el hardware de la lavandería (lavadoras LG Inverter, cajón de dinero) mediante circuitos aislados con optoacopladores y relés, garantizando seguridad industrial.
-
----
-
-## 📸 Características Principales
-
-* **Arquitectura Web-Based:** Construida con [FastAPI / NiceGUI] para permitir múltiples pantallas simultáneas a través de la red local.
-* **Sistema de Cola Asíncrono:**
-* La **Pantalla Cliente (Touch)** procesa el cobro y se libera inmediatamente para el siguiente usuario.
-  * La **Pantalla Admin (Mostrador)** recibe las órdenes pendientes, permitiendo al operador pesar la ropa, asignar la máquina y disparar el inicio del ciclo de forma segura.
-* **Control de Hardware Aislado:** Mapeo de señales para lectura de monederos mecánicos y disparo de pulsos de inicio en máquinas industriales de 6V.
-* **Registro de Ventas en Tiempo Real:** Base de datos `SQLite3` integrada (`ecoluna_datos.db`) para llevar el control financiero e historial de equipos.
+> **v2** — Reestructurado desde cero en la rama `feature/reestructuracion-v2`.
+> La versión anterior (monolítica) está en el historial de Git.
 
 ---
 
-## 🛠️ Requisitos del Sistema y Hardware
+## ¿Qué hace?
 
-- **Cerebro Central:** Raspberry Pi (Zero 2 W / 3B+ / 4) ejecutándose como servidor.
-- **Pantallas:** - 1x Pantalla Táctil (Cliente) ejecutando un navegador web en Modo Kiosco.
-  - 1x Monitor VGA o Dispositivo móvil (Admin/Mostrador) conectado a la red local.
+- **Pantalla táctil del cliente (kiosko):** selección de servicio, ingreso de nombre, peso, cobro con monedas o tarjeta, y confirmación.
+- **Panel de administración:** un operador (en otra pantalla o móvil) recibe las órdenes, pesa la ropa, asigna la máquina e inicia el ciclo.
+- **Control de hardware:** GPIO sobre optoacopladores y relés. Activa el pulso de inicio de lavadoras/secadoras LG (6V) y dispara el solenoide del cajón de dinero (por el momento no hay selenoide, se abre la caja manualmente).
+- **Cobros con tarjeta:** terminal física **Mercado Pago Point** (NEWLAND N950).
+- **Persistencia local:** SQLite en `data/ecoluna_datos.db`. Sin nube. Sobrevive apagones.
+
+---
+
+## Hardware
+
+- **Cerebro:** Raspberry Pi (Zero 2 W / 3B+ / 4).
+- **Pantallas:**
+  - 1x táctil (cliente) con Chromium en modo kiosko.
+  - 1x monitor o dispositivo móvil en la red local (admin).
 - **Electrónica:**
-  - Optoacopladores (ej. 4N25) para aislar el botón de Inicio/Pausa de las lavadoras LG.
-  - Módulo Relé para el disparo del solenoide (12V-18V) de la caja de billetes/cambio.
-  - Tragamonedas multimoneda configurado con blindaje por software (Debounce).
-- **Software:** Python 3.9+, framework web (FastAPI/NiceGUI).
+  - Optoacopladores (ej. 4N25) para aislar el botón Inicio/Pausa de las lavadoras LG.
+  - Módulo relé para el solenoide (12-18V) de la caja de billetes/cambio (por el momento no hay selenoide, se abre la caja manualmente).
+  - Aceptador de monedas multimoneda con debounce por software (300 ms).
+- **Cobro con tarjeta:** terminal Mercado Pago Point NEWLAND N950.
 
 ---
 
-## 🚀 Flujo de Operación (Workflow)
+## Stack
 
-1. **Selección y Cobro (Cliente):** El usuario elige Lavado/Secado en la pantalla táctil y realiza el pago (Efectivo/Terminal).
-2. **Generación de Ticket Virtual:** La Raspberry Pi valida el pago, la base de datos registra una nueva orden en estado "Pendiente" y la pantalla vuelve al inicio.
-3. **Recepción y Asignación (Admin):** El encargado recibe la ropa, la pesa, verifica la capacidad y configura el ciclo físico (rueda de la lavadora).
-4. **Disparo de Hardware:** Desde el panel web de administración, el encargado selecciona la máquina a utilizar y presiona "Iniciar". La Raspberry envía un pulso aislado de 0.5s al optoacoplador, iniciando el lavado.
+- **Python 3.9+**
+- **NiceGUI** como framework web + UI. Un solo proceso sirve `http://localhost:8000`.
+- **SQLite** con `WAL` para concurrencia.
+- **gpiozero + RPi.GPIO** para hardware.
+- **requests** para Mercado Pago (HTTP bloqueante con `asyncio.to_thread`).
+- **Highcharts** vía `nicegui_highcharts` para métricas.
 
 ---
 
-## 🧪 Modo de Pruebas (Test Mode)
-
-Para ejecutar el Kiosko en cualquier computadora (Windows/Mac) o cuando no tengas la Raspberry Pi o sus componentes a la mano, puedes iniciar el sistema en **Modo de Pruebas**. Este modo silencia las alertas de falta de hardware y te permite interactuar usando tu teclado físico.
+## Instalación y arranque
 
 ```bash
-cd src/web_app
-python main.py test
+# 1. Dependencias
+pip install -r requirements.txt
+
+# 2. Configurar credenciales
+cp .env.example .env
+# editar .env con MP_PROD_TOKEN, MP_TEST_TOKEN, MP_TERMINAL_ID, BYPASS_PASSWORD
+
+# 3. Arrancar
+cd src/app
+python main.py          # producción (en la Pi con hardware)
+python main.py test     # modo test (sin GPIO, monedas simuladas con teclado)
 ```
 
-**Simulación de ingreso de monedas con teclado:**
-Al arrancar en este modo, en cualquier punto de las pantallas del kiosko (`/`), puedes presionar las siguientes teclas para simular un pulso desde el monedero:
-- `1` = Agrega $1
-- `2` = Agrega $2
-- `5` = Agrega $5
-- `0` = Agrega $10
+En modo test, en cualquier punto del kiosko (`/`), las teclas `1`/`2`/`5`/`0` simulan monedas de $1/$2/$5/$10.
 
 ---
 
-## 🖥️ Ejecución en Modo Kiosko (Raspberry Pi)
+## Tests
 
-Para un entorno de producción donde la aplicación debe arrancar en pantalla completa y de forma ininterrumpida (Modo Kiosko), se cuenta con un script para generar un acceso directo (`.desktop`).
+```bash
+cd src/app
+python -m pytest ../tests -v
+```
 
-Ejecuta el siguiente script en la raíz del proyecto para generar el lanzador:
+Cobertura inicial: precio, transiciones de estado, repositorio.
+
+---
+
+## Diagnóstico de hardware
+
+```bash
+python tools/test_voltaje.py            # pulso genérico
+python tools/test_voltaje_monedero.py   # pin del aceptador de monedas
+python tools/test_voltaje_key.py        # modo teclado
+```
+
+---
+
+## Modo kiosko en la Pi
+
 ```bash
 ./create_desktop_shortcut.sh
 ```
-Esto creará el archivo **`KioskoEcoLuna.desktop`** en el escritorio del usuario, el cual:
-1. Inicia el servidor de NiceGUI en segundo plano (puerto 8000).
-2. Abre automáticamente el navegador Chromium en modo incógnito, sin barras y en pantalla completa apuntando a `http://localhost:8000`.
+
+Genera `KioskoEcoLuna.desktop` en el escritorio. Al ejecutarlo:
+1. Inicia el servidor NiceGUI en segundo plano (puerto 8000).
+2. Abre Chromium en modo incógnito, sin barras, pantalla completa, apuntando a `http://localhost:8000`.
 
 ---
 
-## 💳 Medios de Pago: Monedas + QR Mercado Pago
+## Flujo de operación
 
-El kiosko acepta **monedas** (aceptador físico) y **QR de Mercado Pago** (in-store / `type=qr` con la API `/v1/orders`). Ambos métodos se gestionan mediante una arquitectura **Strategy + Open/Closed** (`src/web_app/metodos_pago.py`); añadir un nuevo método (cajero manual, terminal Point) es tan simple como crear una nueva clase y agregarla a `METODOS_PAGO_DISPONIBLES`.
+### Cliente (autoservicio)
+1. Selecciona servicio (Autolavado / Secado / Personalizado).
+2. Ingresa su nombre.
+3. Ingresa el peso.
+4. Elige método de pago (monedas o Point).
+5. Completa el pago.
+6. Espera a que el operador asigne máquina.
+7. El operador inicia el ciclo.
 
-### Configuración de credenciales
+### Cliente (personalizado)
+Igual pero el pago se hace en mostrador o con tarjeta. La ropa entra al kanban de personalizado: **Recibido → Alistando → Listo para Entrega**.
 
-Las credenciales viven en `.env` (no se sube al repo por estar en `.gitignore`):
+### Operador
+- Ve la cola de órdenes pendientes.
+- Aprueba el peso (o lo rechaza, pidiendo re-pesar).
+- Asigna la máquina.
+- Inicia el ciclo (pulso GPIO).
+- Al terminar, marca como finalizado.
+- Recibe pagos en efectivo del personalizado (Recibe: x, dar cambio: y) y se registra movimiento automáticamente.
+
+### Superadmin
+- CRUD de servicios, segmentaciones y máquinas.
+- Métricas con Highcharts (uso por máquina, horas pico, días pico, etc.).
+- Respaldo de fábrica de los 3 catálogos.
+- Cortes de caja (abrir, registrar movimientos, cerrar, historial).
+
+---
+
+## Medios de pago
+
+El sistema acepta **monedas** y **Punto Point** (terminal física NEWLAND N950). La arquitectura de pagos es **Strategy + Open/Closed**: añadir un nuevo método es crear una clase en `core/pagos/` y registrarla en la lista de disponibles.
+
+### Configurar Mercado Pago
 
 ```env
-# Token de pruebas (recomendado durante desarrollo)
-MP_TEST_TOKEN=APP_USR-XXXX-test
-# Token de producción (cuando vayas a cobrar dinero real)
-MP_PROD_TOKEN=APP_USR-XXXX-prod
-# Selecciona cuál se usa al iniciar
-MP_ENVIRONMENT=test
+# .env
+MP_PROD_TOKEN=APP_USR-...
+MP_TEST_TOKEN=APP_USR-...
+MP_ENVIRONMENT=prod      # o "test"
+MP_TERMINAL_ID=NEWLAND_N950__...
 ```
 
-### 🔄 Cambiar de Test → Producción
+El cliente HTTP (`adaptadores/mercado_pago/cliente.py`) lee `MP_ENVIRONMENT` y elige el token correcto. Si `MP_ENVIRONMENT=prod` y `MP_PROD_TOKEN` está vacío, hace fallback a `MP_TEST_TOKEN` con un warning.
 
-**No se requiere cambiar código.** Solo edita `.env`:
-
-1. Abre `.env` y rellena `MP_PROD_TOKEN` con tu token de producción (disponible en [Tus Integraciones](https://www.mercadopago.com.mx/developers/panel/app)).
-2. Cambia `MP_ENVIRONMENT=prod`.
-3. Reinicia el kiosko (`python main.py`).
-
-El módulo `mp_qr.py` lee `MP_ENVIRONMENT` al iniciar y elige el token correcto. No hay que tocar nada en `main.py` ni `metodos_pago.py`.
-
-**Para volver a modo test:** cambia `MP_ENVIRONMENT=test` y reinicia.
-
-> ⚠️ **Importante:** nunca commitees el `.env`. El `.gitignore` ya lo excluye, pero verifica antes de hacer `git add`.
-
-### 🖥️ Terminal Point (pendiente)
-
-La integración con **terminal Point física** está en pruebas. En el entorno de test la terminal responde con error `409 already_queued_order_on_terminal` aunque no tenga cobros visibles, se haya reiniciado, re-vinculado y probado en modos `PDV` y `STANDALONE`.
-
-**Diagnóstico actual:**
-- El bloqueo parece estar del lado de Mercado Pago (orden fantasma en servidores o limitación del sandbox de Point).
-- No existe endpoint público para listar/cancelar órdenes Point atoradas.
-
-**Acción pendiente:**
-Enviar ticket a soporte de Mercado Pago ([soporte para integraciones](https://www.mercadopago.com.mx/developers/es/support/center)) con:
-- `terminal_id`: `NEWLAND_N950__N950NCC904817363`
-- `pos_id`: `132903603`
-- Error: `409 already_queued_order_on_terminal`
-- Referencia: orden `type=point` creada via `/v1/orders` en cuenta de test user `3438707426`.
-
-Mientras tanto, el kiosko opera con **monedas + QR Mercado Pago** (dinámico si está habilitado, o estático como fallback).
-
-### 🔧 Habilitar el producto "QR modelo atendido" (instore QR)
-
-Si al escanear el QR dinámico ves en los logs errores como `404 resource not found` en `/instore/qr/v2/orders`, significa que tu cuenta de Mercado Pago **no tiene habilitado el producto "QR modelo atendido"** necesario para la integración dinámica. Esto ocurre tanto en test como en producción si no se activa el producto.
-
-Mientras tanto, el kiosko usa automáticamente el **QR estático** del POS `CAJA01` como respaldo: el cliente escanea el QR, paga con su app de Mercado Pago, y el operador confirma el pago en el panel de administración.
-
-Para activar el producto y obtener la API dinámica:
-
-1. **Inicia sesión** en [Tus Integraciones](https://www.mercadopago.com.mx/developers/panel/app) con la cuenta vendedora.
-2. **Crea una integración** tipo "QR modelo atendido" / "QR in-store" (suele estar en "Productos disponibles" → "Pagos presenciales" → "QR modelo atendido").
-3. **Asocia tu POS `CAJA01`** (puedes usar `tools/mp_dev/create_checkout.py` para crearlo si no existe).
-4. **Verifica que el sponsor** (tu `MP_USER_ID` en `.env`) sea el dueño de la cuenta vendedora.
-5. **Espera ~5 minutos** a que MP propague los cambios.
-6. **Reinicia el kiosko** y vuelve a probar.
-
-Si la activación por panel no funciona, **contacta a soporte de Mercado Pago** ([soporte para integraciones](https://www.mercadopago.com.mx/developers/es/support/center)) indicando:
-- Tu `MP_USER_ID`
-- Tu POS `CAJA01`
-- El error: *"Necesito habilitar el producto QR in-store atendido en mi cuenta para usar el endpoint `/instore/qr/v2/orders`. El endpoint responde 404."*
-
-Mientras la API no esté habilitada, **el kiosko seguirá funcionando con el QR estático como fallback**.
-
-### 🧪 Probar pagos QR en modo Test
-
-Mercado Pago provee **tarjetas de prueba** que simulan diferentes escenarios sin usar dinero real. Inicia sesión en la app de Mercado Pago con tu **usuario de test** (no tu cuenta real) y escanea los QR que genere el kiosko.
-
-#### Mastercard de prueba (las más usadas)
-
-| Marca | Número | Vencimiento | CVV | Resultado al pagar |
-|-------|--------|-------------|-----|--------------------|
-| Mastercard | **5031 7557 3453 0604** | 11/30 | 123 | ✅ Aprobado |
-| Mastercard | **5031 4332 1540 6351** | 11/30 | 123 | ❌ Fondos insuficientes |
-| Mastercard | **5031 4332 1540 6202** | 11/30 | 123 | ❌ Tarjeta inválida (BIN desconocido) |
-| Mastercard | **5031 4332 1540 6210** | 11/30 | 123 | ❌ No autorizado |
-| Mastercard | **5031 4332 1540 6228** | 11/30 | 123 | ❌ Error de tarjeta |
-| Mastercard | **5031 4332 1540 6285** | 11/30 | 123 | ❌ Llamar al emisor |
-| Mastercard | **5031 4332 1540 6293** | 11/30 | 123 | ⚠️ Pedir autorización (no se completa) |
-
-#### Visa de prueba
-
-| Marca | Número | Vencimiento | CVV | Resultado al pagar |
-|-------|--------|-------------|-----|--------------------|
-| Visa | **4509 9535 6623 3704** | 11/30 | 123 | ✅ Aprobado |
-| Visa | **4013 5406 8274 4600** | 11/30 | 123 | ❌ Rechazado (genérico) |
-| Visa | **4851 7500 1000 0012** | 11/30 | 123 | ❌ CVV inválido |
-| Visa | **4012 8888 8888 1881** | 11/30 | 123 | ❌ Fecha de vencimiento inválida |
-| Visa | **4009 1300 0000 0009** | 11/30 | 123 | ❌ Tarjeta reportada como robada |
-
-#### American Express
+### Tarjetas de prueba (entorno test)
 
 | Marca | Número | Vencimiento | CVV | Resultado |
 |-------|--------|-------------|-----|-----------|
-| Amex | **3711 8030 3257 522** | 11/30 | 1234 | ✅ Aprobado |
-| Amex | **3707 5850 1100 0009** | 11/30 | 1234 | ❌ Rechazado |
+| Mastercard | `5031 7557 3453 0604` | 11/30 | 123 | ✅ Aprobado |
+| Mastercard | `5031 4332 1540 6351` | 11/30 | 123 | ❌ Fondos insuficientes |
+| Visa | `4509 9535 6623 3704` | 11/30 | 123 | ✅ Aprobado |
+| Visa | `4013 5406 8274 4600` | 11/30 | 123 | ❌ Rechazado |
+| Amex | `3711 8030 3257 522` | 11/30 | 1234 | ✅ Aprobado |
 
-> **Datos a usar en el checkout (datos del pagador ficticio):**
-> - Nombre: `APRO` (para aprobadas) o `RECH` (para rechazadas)
+> Datos del pagador ficticio:
+> - Nombre: `APRO` (aprobadas) o `RECH` (rechazadas)
 > - DNI: `12345678`
-> - Email: `test_user_XXXXX@testuser.com` (el de tu cuenta de test)
+> - Email: el de tu cuenta de test
 
-#### Pasos para probar en el kiosko
+### ⚠️ Importante
 
-1. **Carga `.env` con tokens de test** y `MP_ENVIRONMENT=test`.
-2. **Inicia la app:** `cd src/web_app && python main.py test` (o `python main.py` en la Pi).
-3. **Sigue el flujo del cliente:** Selecciona servicio → nombre → peso → método de pago → elige **QR Mercado Pago**.
-4. El kiosko genera un QR. **Abre tu app de Mercado Pago con la cuenta de test** y escanea el QR.
-5. Confirma el pago con la tarjeta de prueba que prefieras.
-6. El kiosko detectará el pago (polling cada 3s) y mostrará el paso de éxito.
-
-#### ⚡ Prueba del modo recuperación de órdenes (apagón simulado)
-
-Para verificar que las órdenes huérfanas se cancelan al iniciar:
-
-1. Selecciona servicio → método de pago QR (genera una orden `open` en MP).
-2. **Cierra la app o apaga la Pi** (Ctrl+C o `sudo shutdown`).
-3. Vuelve a iniciar el kiosko.
-4. Revisa la terminal: debería imprimir cuántas órdenes huérfanas se cancelaron. En producción esas órdenes liberarían el slot en MP y permitirían nuevos cobros.
+- **Nunca** commitees `.env`. Está en `.gitignore`, pero verifica antes de `git add`.
+- Al cambiar entre test y producción solo edita `.env` y reinicia. No se toca código.
 
 ---
 
-## 🗄️ Estructura de la Base de Datos
+## Estructura del proyecto
 
-La aplicación crea automáticamente el archivo `ecoluna_datos.db`. La tabla principal `transacciones` gestiona la cola de trabajo:
+```
+kiosko_pago/
+├── src/app/                      # código de la app
+│   ├── main.py                   # entrypoint NiceGUI
+│   ├── config.py
+│   ├── core/                     # lógica de negocio (sin infra)
+│   │   ├── estados.py            # enums: EstadoOrden, Modalidad, MetodoPago, …
+│   │   ├── transiciones.py       # única función que muta estados
+│   │   ├── orden.py              # clase Orden
+│   │   ├── precio.py             # calcular_precio(item, peso)
+│   │   ├── servicios.py
+│   │   ├── maquinas.py
+│   │   ├── pagos/                # Strategy: Monedas, Point, Mostrador
+│   │   ├── cortes.py
+│   │   ├── respaldo.py
+│   │   └── reportes.py
+│   │
+│   ├── repo/                     # persistencia (única capa con SQL)
+│   │   ├── db.py
+│   │   ├── _row_a.py             # row -> dataclass
+│   │   ├── transacciones.py
+│   │   ├── servicios.py
+│   │   ├── segmentaciones.py
+│   │   ├── maquinas.py
+│   │   ├── cortes.py
+│   │   └── respaldos.py
+│   │
+│   ├── adaptadores/              # I/O externo
+│   │   ├── hardware/             # GPIO + monedero + máquinas
+│   │   └── mercado_pago/         # cliente HTTP + Point + polling
+│   │
+│   ├── eventos/                  # bus pub/sub in-proc
+│   │
+│   └── ui/                       # NiceGUI (capa obediente)
+│       ├── kiosko/               # página cliente + 5 pasos + wizard
+│       ├── admin/                # login + dashboard + operativo + superadmin + cortes
+│       └── compartido/           # estilos, auth, _componentes reutilizables
+│
+├── tools/                        # diagnóstico GPIO + referencia MP
+├── media/                        # logos, imágenes, iconos SVG
+├── data/                         # ecoluna_datos.db (gitignored)
+├── tests/                        # pytest
+├── .env / .env.example
+├── requirements.txt
+├── create_desktop_shortcut.sh
+├── AGENTS.md                     # guía técnica detallada
+└── README.md                     # este archivo
+```
 
-* `id_transaccion`: ID único.
-* `fecha_hora`: Fecha y hora exactas de la venta.
-* `tipo_servicio`: "Lavar", "Secar", "Ambos".
-* `monto_pagado`: Costo total cobrado.
-* `id_equipo`: Identificador de la máquina asignada (Lavadora 1, Secadora 2).
-* `estado`: **Pendiente** (Pagado, esperando ropa) | **En Curso** (Lavando) | **Finalizado**.
+Las **reglas de imports** completas y el modelo de dominio están en `AGENTS.md`.
 
 ---
 
-## 📝 Próximos Pasos (Roadmap)
+## Modelo de datos (resumen)
 
-[x] **Migración a Web:** Extraer la lógica de `customtkinter` y montar el servidor backend/frontend.
-[x] **Implementación de íconos:** Reemplazar los emojis por íconos svg.
-[x] **Medios de pago múltiples:** Strategy pattern con Monedas, QR MP, y slot para Terminal Point.
-[ ] **Integración de Caja de Dinero:** Añadir pulso a través de un módulo relé para abrir el cajón (solenoide 18V) al dar cambio.
-[ ] **Auditoría Energética (PZEM-004T):** Implementar monitoreo de consumo eléctrico en tiempo real para evitar que clientes (o personal) seleccionen ciclos de secado en lavadoras asignadas solo para lavado.
-[ ] **Acceso Remoto:** Configuración de túnel (ej. Tailscale) para revisión de cortes de caja a distancia.
-[ ] **Bypass:** Acoplar Google Authenticator para el paso de autorización de Servicios de Cortesía en el panel de administrador.
+Tablas principales (todas en SQLite):
+
+- `transacciones` — órdenes. Estados: `Pendiente-peso`, `Procesando-pago`, `Pendiente-pago`, `Pendiente`, `En-curso`, `Finalizado`, `Cancelado`.
+- `servicios` — catálogo de servicios (data-driven, editable por el superadmin).
+- `segmentaciones` — variantes dentro de un servicio (ej. "Lava + Seca + Dobla").
+- `maquinas` — lavadoras y secadoras con su pin GPIO, modo (`pulso`/`sostenido`) y capacidad.
+- `cortes_caja` + `cortes_movimientos` — apertura, cierre y arqueo por turno.
+- `respaldos_catalogo` — snapshot JSON de los 3 catálogos para restaurar a un estado conocido.
+
+---
+
+## Roles y accesos
+
+- **Cliente** — anónimo, solo consume el kiosko (`/`).
+- **Operador** (Moi, Capi, David) — login en `/admin/login`. Ve y manipula órdenes.
+- **Superadmin** (Moi, David) — además tiene acceso a `/admin/superadmin` y `/admin/cortes`.
+
+---
+
+## Próximos pasos (roadmap)
+
+- [x] **Migración a Web:** extraer la lógica legacy y montar el servidor NiceGUI.
+- [x] **Estrategia de pagos:** Monedas + Point + QR MP.
+- [x] **Cortes de caja** con arqueo.
+- [x] **Métricas** con Highcharts.
+- [x] **Respaldo de fábrica** de los 3 catálogos.
+- [ ] **Caja de dinero:** añadir pulso a través de un módulo relé para abrir el cajón al dar cambio.
+- [ ] **Auditoría energética (PZEM-004T):** monitoreo de consumo en tiempo real.
+- [ ] **Acceso remoto:** túnel (ej. Tailscale) para revisión de cortes a distancia.
+- [ ] **Bypass con TOTP:** acoplar Google Authenticator al paso de autorización de servicios de cortesía.
+
+---
+
+## Soporte
+
+Para detalles técnicos, decisiones de arquitectura y reglas de contribución, ver [`AGENTS.md`](./AGENTS.md).

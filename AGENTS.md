@@ -1,705 +1,452 @@
-# AGENTS.md — EcoLuna Kiosko Payment System
+# AGENTS.md — EcoLuna Kiosko Payment System (v2)
 
-## Overview
-
-This is a **Python/NiceGUI web application** for a laundromat kiosk (EcoLuna). It runs on a Raspberry Pi and controls:
-- Coin acceptor (monedero) for payment
-- Industrial washing machines via GPIO (optoisolated)
-- SQLite database for transaction logging
-
-### Key Paths
-```
-src/web_app/main.py                # Main NiceGUI app entry point
-src/web_app/models.py              # State management (KioskoState dataclass)
-src/web_app/database_web.py        # Async SQLite operations
-src/web_app/hardware.py            # GPIO control for machines/coins
-src/web_app/metodos_pago.py        # Strategy pattern for payment methods (monedas, point)
-src/web_app/services/notifications.py  # State + admin/kiosko notification registry
-src/web_app/services/mercadopago.py    # HTTP client for Mercado Pago Point API
-src/web_app/services/point_polling.py  # Background polling task for Point orders
-src/web_app/components/            # UI components (kiosko/, admin/, shared.py)
-src/web_app/pages/                 # NiceGUI page handlers (kiosko, admin_login, admin_*)
-tools/                             # Hardware test scripts and MercadoPago reference tools
-tools/test_voltaje*.py             # GPIO hardware diagnostic scripts
-tools/mp_dev/                      # MercadoPago integration reference scripts
-data/ecoluna_datos.db              # SQLite database file
-media/                             # Static assets (logos, images, icons/)
-media/icons/                       # SVG icons (used instead of emojis for Pi compat)
-agent_notation/                    # Internal agent notes and TODOs
-```
+> Documento de orientación para cualquier agente o humano que trabaje en el código.
+> Reescrito desde cero en la rama `feature/reestructuracion-v2`.
+> La versión anterior (monolítica) está documentada en el historial de Git.
 
 ---
 
-## Build / Run Commands
+## 1. Visión del producto
 
-### Web Application (Main)
-```bash
-# Normal mode (requires Raspberry Pi hardware)
-cd src/web_app && python main.py
+**EcoLuna Kiosko** es el sistema central de cobro y operación de la lavandería EcoLuna. Corre en una **Raspberry Pi** que actúa como cerebro local:
 
-# Test mode (simulates hardware with keyboard input)
-cd src/web_app && python main.py test
+- Una **pantalla táctil** (cliente) en modo kiosco muestra la selección de servicio, el cobro y la confirmación.
+- Un **panel de administración** (operador) en otra pantalla o dispositivo móvil de la red local recibe las órdenes pagadas, pesa la ropa, asigna máquina y dispara el inicio del ciclo.
+- El hardware (monedero, lavadoras, secadoras) se controla desde la Pi mediante **GPIO** con optoacopladores.
+- Los cobros con tarjeta se hacen en una **terminal Mercado Pago Point** (NEWLAND N950) principalmente, o mostrando un **QR** de Mercado Pago (no recomendado por el momento).
+- Toda la operación (órdenes, cortes de caja, catálogo de servicios, máquinas, métricas) se persiste en una base de datos **SQLite** local.
 
-# In test mode: press 1/2/5/0 keys to simulate $1/$2/$5/$10 coins
-```
+**Roles:**
+- **Cliente** — solo consume el kiosko. No se identifica.
+- **Operador (admin)** — Moi, David (superadmins) y Capi. Ve y manipula las órdenes.
+- **Superadmin** — Moi y David. Único con acceso al CRUD de servicios/maquinas, cortes de caja, métricas y respaldo de fábrica.
 
-### Hardware Test Scripts (tools/)
-```bash
-# Test GPIO voltage on pin 21 (monedero)
-python tools/test_voltaje.py
+**Concepto clave:** la Pi es la fuente de verdad. No hay nube. El sistema debe sobrevivir apagones y recuperar el estado al reiniciar.
 
-# Test coin reader logic
-python tools/test_voltaje_monedero.py
+---
 
-# Test voltage on specific pin
-python tools/test_voltaje_key.py
-```
+## 2. Stack y prerrequisitos
 
-### Install Dependencies
+- **Python 3.9+** (probado en 3.11).
+- **NiceGUI** como framework web + UI. La app es un único proceso `python main.py` que sirve en `http://localhost:8000`.
+- **SQLite** con `WAL` para concurrencia entre kiosko y admin.
+- **gpiozero + RPi.GPIO** para hardware (cargados solo si están disponibles; en su defecto, modo test con teclado).
+- **requests** para el cliente HTTP de Mercado Pago (bloqueante, ejecutado con `asyncio.to_thread`).
+- **Highcharts** vía `nicegui_highcharts` para métricas en `/admin/superadmin`.
+
 ```bash
 pip install -r requirements.txt
 ```
 
 ---
 
-## Testing
-
-**There is no formal test framework.** Use manual testing with test mode.
-
-To run the app in test mode and verify functionality:
-1. `cd src/web_app && python main.py test`
-2. Use keyboard keys to simulate coins: `1`=$1, `2`=$2, `5`=$5, `0`=$10
-3. Navigate through the UI flow: select service → enter name → enter weight → wait for admin weight approval → select payment method → insert coins / wait for terminal approval → confirm
-
----
-
-## Code Style Guidelines
-
-### Python Version
-- **Python 3.9+** required
-- Uses type hints where obvious (not enforced strictly)
-
-### Imports
-- Standard library first, then third-party, then local
-- Avoid wildcard imports (`from module import *`)
-- Local relative imports use `from models import X` (web_app directory)
-
-```python
-# Correct
-from nicegui import ui, app
-import asyncio
-from models import KioskoState, SERVICIOS_AUTO
-import database_web
-import hardware
-
-# Legacy style (acceptable in older files)
-import sqlite3
-from gpiozero import Button
-```
-
-### Formatting
-- **4 spaces** indentation (not tabs)
-- **Max line length**: ~120 characters (informal, use judgment)
-- Single blank line between functions/methods within classes
-- No blank line between related one-liners
-
-### Naming Conventions
-| Type | Convention | Example |
-|------|------------|---------|
-| Classes | PascalCase | `KioskoState`, `ServicioInfo` |
-| Functions/methods | snake_case | `registrar_venta`, `seleccionar_servicio` |
-| Constants | UPPER_SNAKE | `PIN_MONEDERO`, `SERVICIOS_AUTO` |
-| Variables | snake_case | `dinero_ingresado`, `peso_kg` |
-| Private attrs | _leading_underscore | `_trigger_change`, `_running` |
-| Dataclass fields | snake_case | `nombre`, `precio`, `duracion_min` |
-
-### Type Hints
-Use where beneficial but don't over-annotate:
-
-```python
-# Good - clear intent
-def seleccionar_servicio(self, servicio_nombre: str) -> None:
-    ...
-
-def get_faltante(self) -> int:
-    ...
-
-# Good - dataclass
-@dataclass
-class ServicioInfo:
-    nombre: str
-    precio: int
-    duracion_min: int
-    modalidad: str = 'autoservicio'
-
-# Acceptable - infer simple types
-def reset(self):
-    self.servicio_seleccionado = None
-```
-
-### Dataclasses (Preferred for Data Models)
-Use `@dataclass` for simple data containers:
-
-```python
-from dataclasses import dataclass
-
-@dataclass
-class ServicioInfo:
-    nombre: str
-    precio: int
-    duracion_min: int
-    modalidad: str = 'autoservicio'
-    icono: str = '/media/icons/leaf.svg'  # Usar SVG path, no emoji
-```
-
-### Error Handling
-- Use bare `except Exception` sparingly — prefer specific exceptions
-- Hardware errors (GPIO) are caught and logged, system continues in degraded mode
-- User errors show notifications via `ui.notify()`
-
-```python
-# Hardware errors - graceful degradation
-try:
-    from gpiozero import Button
-    HARDWARE_AVAILABLE = True
-except ImportError:
-    HARDWARE_AVAILABLE = False
-    print("Warning: Hardware GPIO libraries not found...")
-
-# Async error handling
-try:
-    await hardware.activar_lavadora(equipo_id)
-except Exception as e:
-    print(f"Error activating PIN {pin}: {e}")
-```
-
-### Async/Await Patterns
-- Database operations use `asyncio.run_in_executor()` to avoid blocking
-- Use `asyncio.create_task()` for fire-and-forget background tasks
-- Hardware callbacks that need UI updates use `asyncio.create_task()`
-
-```python
-async def run_in_executor(func, *args):
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, func, *args)
-
-async def registrar_venta_async(...):
-    return await run_in_executor(_registrar_venta, ...)
-```
-
-### NiceGUI Patterns
-- Use `@ui.page('/path')` decorator for routes
-- Use `ui.refreshable` for dynamic content that needs refresh
-- State management via `KioskoState` class passed to UI closures
-- Callbacks in lambdas must capture values properly: `lambda s=svc: action(s)`
-
-```python
-@ui.page('/')
-def kiosko_cliente():
-    ui.add_head_html(FONTS_HTML + KIOSKO_CSS)
-    # ...
-
-@ui.refreshable
-async def vista_ordenes():
-    # ...
-    await vista_ordenes()
-```
-
-### SQL Patterns
-- Use parameterized queries (no string formatting)
-- WAL mode for concurrent access
-- Safe migrations: check column existence before ALTER TABLE
-
-```python
-conn.execute('PRAGMA journal_mode=WAL;')
-cursor.execute(
-    "INSERT INTO transacciones (fecha_hora, tipo_servicio, ...) VALUES (?, ?, ...)",
-    (fecha_hora, servicio, monto, ...)
-)
-```
-
-###   File Organization
-```
-src/
-  web_app/
-    main.py          # Routes, UI, callbacks
-    models.py        # Data classes and KioskoState
-    database_web.py  # Async DB operations
-    hardware.py      # GPIO and machine control
-    metodos_pago.py  # Strategy pattern: MetodoPago ABC + Monedas/Terminal
-tools/
-  test_voltaje*.py    # GPIO hardware diagnostic scripts
-  mp_dev/             # MercadoPago reference scripts (not used in main flow)
-```
-
-### Comments
-- Use docstrings for public functions/classes
-- Inline comments explain **why**, not **what**
-- No comment clutter — code should be self-explanatory
-
-```python
-def seleccionar_servicio(self, servicio_nombre: str):
-    """Find and select a service by name, reset payment state."""
-    for s in SERVICIOS:
-        if s.nombre == servicio_nombre:
-            # Personalizado skips the payment step
-            self.servicio_seleccionado = s
-            self.dinero_ingresado = 0
-            self.paso_actual = 1
-            self._trigger_change()
-            return
-```
-
-### CSS Conventions
-- CSS is defined as multi-line strings in `main.py` (KIOSKO_CSS, ADMIN_CSS)
-- Uses custom classes with BEM-like naming: `.orden-card`, `.orden-card__nombre`
-- Inline styles only for dynamic values (rare)
-
----
-
-## Environment Variables
-
-Create `.env` in project root (not committed to git):
+## 3. Estructura del repositorio
 
 ```
-BYPASS_PASSWORD=admin123                      # Password for courtesy/bypass service and admin confirmations
-MP_ENVIRONMENT=prod                            # 'prod' or 'test'
-MP_PROD_TOKEN=APP_USR-...                      # Mercado Pago production token
-MP_TEST_TOKEN=APP_USR-...                      # Mercado Pago test token
-MP_TERMINAL_ID=NEWLAND_N950__N950NCC904817363  # Unique Point terminal ID
+kiosko_pago/
+├── src/
+│   └── app/                              # código de la app
+│       ├── main.py                       # entrypoint NiceGUI
+│       ├── config.py                     # .env, constantes, paths
+│       │
+│       ├── core/                         # lógica de negocio (sin imports de infra)
+│       │   ├── estados.py                # enums: EstadoOrden, Modalidad, MetodoPago, EtapaKanban
+│       │   ├── transiciones.py           # única función que muta estado: aplicar(orden, evento)
+│       │   ├── orden.py                  # clase Orden
+│       │   ├── precio.py                 # calcular_precio(item, peso)
+│       │   ├── servicios.py              # carga de catálogo (servicios + segmentaciones)
+│       │   ├── maquinas.py               # TypedDict + cache de EQUIPOS
+│       │   ├── pagos/                    # Strategy: MetodoPago ABC + Monedas/Mostrador/Point
+│       │   ├── cortes.py                 # abrir/cerrar/registrar movimiento
+│       │   ├── respaldo.py               # snapshot JSON de los 3 catálogos
+│       │   └── reportes.py               # 5 queries de métricas
+│       │
+│       ├── repo/                         # persistencia (única capa con SQL)
+│       │   ├── db.py                     # conexión, WAL, migraciones, seeds
+│       │   ├── _row_a.py                 # mapeo row -> dataclass
+│       │   ├── transacciones.py
+│       │   ├── servicios.py
+│       │   ├── segmentaciones.py
+│       │   ├── maquinas.py
+│       │   ├── cortes.py
+│       │   └── respaldos.py
+│       │
+│       ├── adaptadores/                  # I/O externo
+│       │   ├── hardware/                 # GPIO + monedero + control de máquinas
+│       │   └── mercado_pago/             # cliente HTTP + Point + polling
+│       │
+│       ├── eventos/                      # pub/sub in-proc
+│       │   ├── bus.py                    # Evento + Bus (asyncio)
+│       │   └── tipos.py                  # OrdenCreada, PagoConfirmado, …
+│       │
+│       └── ui/                           # NiceGUI (capa obediente)
+│           ├── kiosko/                   # página cliente + 5 pasos + sidebar + wizard
+│           ├── admin/                    # login + dashboard + operativo + superadmin + cortes
+│           └── compartido/               # estilos, auth, icono, _componentes reutilizables
+│
+├── tools/                                # diagnóstico GPIO + referencia MP
+│   ├── test_voltaje*.py
+│   └── mp_dev/
+│
+├── media/                                # logos, imágenes, iconos SVG
+├── data/                                 # ecoluna_datos.db (gitignored)
+├── tests/                                # pytest: precio, transiciones, repo
+├── .env / .env.example
+├── requirements.txt
+├── create_desktop_shortcut.sh
+├── AGENTS.md                             # este archivo
+└── README.md
 ```
 
-## Integración Mercado Pago Point
+### Reglas de imports
 
-Cobro automático en terminal Point. El kiosko envía la orden a la terminal física; el cliente paga y el sistema confirma sin intervención del operador.
+| Puede importar de | No puede importar de |
+|---|---|
+| `core/` | `repo/`, `adaptadores/`, `eventos/`, `ui/` |
+| `repo/` | `ui/`, `adaptadores/` (excepto tipos) |
+| `adaptadores/` | `ui/`, `core/` (excepto tipos) |
+| `eventos/` | `ui/`, `repo/`, `adaptadores/` (excepto tipos) |
+| `ui/` | cualquiera (es la capa superior) |
 
-### Flujo
-1. Cliente selecciona servicio → ingresa peso → admin valida → elige **Punto Point**.
-2. Kiosko llama `services/mercadopago.crear_orden_point()` con `asyncio.to_thread` (no bloquea el event loop).
-3. Si éxito: orden pasa a `Pendiente-peso` → `Procesando-pago` → `Pendiente-pago` con `modalidad=autoservicio-point` o `personalizado-point` y `mp_order_id` poblado.
-4. Kiosko muestra pantalla de espera "Procesando pago con Point".
-5. `services/point_polling.py` vigila cada orden con `mp_order_id` no vacío. Polling cada 5s.
-6. Al detectar `status="paid"`:
-   - `aprobar_pago_terminal_async` con `folio = data.transactions.payments[0].id` (folio automático, no manual).
-   - `numero_transaccion_terminal` se guarda con ese id.
-   - Kiosko notificado → avanza a pantalla de éxito.
-7. Si expira (5 min default) o se cancela en MP: orden local se borra, kiosko notificado y devuelto a métodos de pago.
-
-### Cancelación manual
-- **La terminal NEWLAND N950 no responde a cancelaciones por API**. Hay que cancelar manualmente en la terminal.
-- El kiosko intenta `mercadopago.cancelar_orden()` best-effort cuando el cliente presiona "Regresar", pero si falla, debe hacerse en la terminal física.
-- El operador también puede cancelar desde `/admin/operativo` con el botón existente (la terminal quedará con la orden encolada hasta cancelar manualmente).
-
-### Selección de terminal
-- Por ahora solo hay una terminal: `MP_TERMINAL_ID=NEWLAND_N950__N950NCC904817363` (hardcoded en `.env`).
-- Si en el futuro hay varias, agregar selector en `/admin/settings` que liste con `listar_terminales()`.
-
-### Archivos
-- `services/mercadopago.py` — cliente HTTP (crear_orden_point, consultar_orden, cancelar_orden, listar_terminales)
-- `services/point_polling.py` — tarea de fondo `iniciar_polling()` / `detener_polling()`
-- `services/point_polling.py:_extraer_pago_id` — extrae `transactions.payments[0].id` para guardarlo como folio
-- `database_web.py` — columna `mp_order_id` (migración automática), `obtener_ordenes_point_pendientes_async`, `guardar_mp_order_id_async`, `obtener_mp_order_id_async`
-- `metodos_pago.py` — `MetodoTerminalPoint` ahora es "Punto Point" (no "Terminal Point"); usa `mercadopago.crear_orden_point`
-- `components/kiosko/paso_peso.py` — rama de espera "Procesando pago con Point"
-- `components/admin/operativo_seccion.py` — tarjeta Point sin botón "Confirmar" (es automático)
-- `pages/admin_operativo.py` — `confirmar_pago` rechaza confirmaciones manuales de Point
-- `components/shared.py:badge_metodo_pago` — badge "Point" en azul
-
----
-
-## Common Tasks
-
-### Adding a New Service
-1. Add to `SERVICIOS_AUTO` or `SERVICIOS_PERSONALIZADO` in `models.py`
-2. Update prices/names as needed in `main.py` UI flow
-
-### Adding a New Machine
-1. Edit `EQUIPOS` dict in `hardware.py`
-2. Add GPIO pin mapping
-3. Physical wiring to Raspberry Pi required
-
-### Adding a New Payment Method
-Architecture: **Strategy + Open/Closed**. `MetodoPago` is the abstract base in `src/web_app/metodos_pago.py`.
-
-1. Create a new class extending `MetodoPago` in `metodos_pago.py`
-2. Implement `async procesar_pago() -> ResultadoPago`
-3. Implement `render_panel(on_cancelar, on_pago_exitoso)` using NiceGUI
-4. Add the class to `METODOS_PAGO_DISPONIBLES`
-5. The kiosko will auto-show it in paso 2 (selección de método de pago)
-
-Currently implemented:
-- `MetodoMonedas` (`codigo="monedas"`) — coin acceptor (self-service)
-- `MetodoTerminalPoint` (`codigo="terminal"`) — manual card-terminal payment, approved by admin
-
-Approval flow:
-- After the customer enters weight on the kiosk, the order is created with `estado='Pendiente-peso'` and the kiosk shows a "waiting for operator" overlay.
-- The admin sees the order under `/admin/autoservicio` in "Esperando validación de peso" and clicks **Aprobar** or **Rechazar**.
-- If approved, the order moves to `estado='Procesando-pago'` and the kiosk moves to payment-method selection.
-- The admin sees weight-approved orders in `/admin/autoservicio` under **Procesando pago**:
-  - While the customer pays with **coins** (autoservicio only), the order stays in `Procesando-pago` and automatically moves to `Pendiente` once payment is complete.
-  - If the customer chooses **Terminal**, the order becomes `estado='Pendiente-pago'`, the kiosk shows "processing payment" overlay, and the admin enters an optional transaction folio and confirms.
-  - For **personalizado**, **"Pagar en mostrador"** creates a `Pendiente-pago` record with `modalidad='personalizado-pendiente-pago'`; the admin confirms the cash payment before the order moves to `Pendiente`.
-- This applies to both **autoservicio** and **personalizado** services. Personalized orders only move to `/admin/personalizado` once they reach `estado='Pendiente'`.
-- **Coin payment is disabled for personalized services**; they can only pay by terminal or with cash at the counter (both require admin approval).
-- **Cancellation at any point deletes the pending record** from the database, both for autoservicio and personalized.
-- Bypass/courtesy orders are created directly in `estado='Pendiente'` (ready for machine assignment), so they never appear in "Procesando pago".
-- The customer can press **Regresar** on any waiting overlay to cancel the pending record.
-
-### Sub-state Pattern for Wizard Pasos
-The wizard uses `paso_actual: int` (0, 1, 2, 3, 4) plus boolean flags for sub-states inside a paso:
-- `mostrando_sub_lavar` — true while showing the Lavar sub-menu inside paso 0
-- `mostrando_metodos_pago` — true while showing payment method selection inside paso 2
-- `esperando_aprobacion_admin` — true while the kiosk is waiting for admin approval (weight or terminal payment)
-- `motivo_espera` — `"peso"` or `"pago"`, used to customize the waiting overlay text
-
-**Do not use float or non-int types for `paso_actual`.** When adding a new sub-state, follow this pattern (set the boolean + `_trigger_change()`).
-
-### Database Migrations
-Add columns safely in `database_web.py`:
-```python
-cursor.execute("PRAGMA table_info(transacciones)")
-cols_existentes = {row[1] for row in cursor.fetchall()}
-if 'new_column' not in cols_existentes:
-    cursor.execute("ALTER TABLE transacciones ADD COLUMN new_column TEXT DEFAULT ''")
+**Verificación rápida:**
+```bash
+# 0 ocurrencias esperadas
+grep -r "from nicegui" src/app/core src/app/repo src/app/adaptadores src/app/eventos
+grep -r "from gpiozero" src/app/core src/app/repo src/app/ui
+grep -r "import requests" src/app/core src/app/repo src/app/ui
+grep -rE "SELECT|INSERT|UPDATE|DELETE" src/app/core src/app/ui src/app/adaptadores
 ```
 
 ---
 
-## Iconos SVG (Reemplazo de Emojis)
+## 4. Comandos principales
 
-**Problema**: Los emojis no renderizan correctamente en la Raspberry Pi (dependen de fuentes del sistema). La solución es usar íconos SVG en lugar de emojis en toda la UI.
+### Ejecutar la app
 
-### Archivos SVG disponibles
-Ubicación: `media/icons/` — 19 SVGs creados con estilo consistente (24x24, `stroke="currentColor"` o fill fijo):
+```bash
+# Modo producción (en la Raspberry Pi con hardware)
+cd src/app && python main.py
 
-| Archivo | Uso |
-|---------|-----|
-| `basket.svg` | Kanban "Alistando" |
-| `bed.svg` | Edredones (personalizado) |
-| `box.svg` | Kanban "Listo para Entrega" |
-| `check.svg` | Éxito / orden registrada |
-| `circle-orange.svg` | Badge "En Proceso" |
-| `circle-yellow.svg` | Badge "Pendiente" |
-| `gear.svg` | Máquina en uso / asignada |
-| `inbox.svg` | Kanban "Recibido" |
-| `leaf.svg` | Autolavado (opcional) |
-| `money-bag.svg` | Cambio en éxito |
-| `notes.svg` | Notas en kanban |
-| `scale.svg` | Peso (paso 2) |
-| `shirt.svg` | Ropa (personalizado), admin |
-| `sleep.svg` | Estado vacío sin máquinas |
-| `ticket.svg` | Cortesía / Bypass |
-| `user.svg` | Chip de operador |
-| `warning.svg` | Capacidad excedida |
-| `wave.svg` | Bienvenida admin |
-| `wind.svg` | Secado |
-
-### Emoji → SVG: estado actual
-
-| Archivo | Emojis pendientes | Prioridad |
-|---------|-------------------|-----------|
-| `src/web_app/models.py` | 0 | Alta |
-| `src/web_app/main.py` | 10 (UI kiosko + admin) | Alta |
-| `src/web_app/hardware.py` | 1 (línea 101, consola) | Media |
-| `tools/test_voltaje*.py` | 4 (consola, desarrollo) | Baja |
-
-### Patrón de reemplazo
-
-```python
-# Antes (emoji en ui.html)
-ui.html('<div class="cambio-box">💰 Su cambio: $X</div>')
-
-# Después (SVG img)
-ui.html(
-    '<div class="cambio-box">'
-    '<img src="/media/icons/money-bag.svg" style="width:20px;height:20px;vertical-align:middle;margin-right:6px;">'
-    f'Su cambio: ${cambio}</div>'
-)
-
-# Alternativa con ui.image
-with ui.element('div').classes('dash-card-icon'):
-    ui.image('/media/icons/shirt.svg').style('width:48px;height:48px;')
+# Modo test (sin GPIO, simula monedas con teclado)
+cd src/app && python main.py test
 ```
 
-### Verificación
-1. `cd src/web_app && python main.py test`
-2. Visitar `/` y `/admin` — confirmar que los SVGs cargan correctamente
-3. Si un SVG no aparece, verificar que `app.add_static_files('/media', MEDIA_DIR)` esté activo en `main.py`
+En modo test, las teclas `1`/`2`/`5`/`0` simulan monedas de $1/$2/$5/$10.
 
-### Documentación detallada
-Ver `agent_notation/icons_todo.md` para mapeo completo por línea y consejos de implementación.
+### Tests
+
+```bash
+cd src/app && python -m pytest ../tests -v
+```
+
+Cobertura inicial: `test_precio.py`, `test_transiciones.py`, `test_repo.py`.
+
+### Diagnóstico de hardware (carpeta `tools/`)
+
+```bash
+python tools/test_voltaje.py
+python tools/test_voltaje_monedero.py
+python tools/test_voltaje_key.py
+```
+
+### Modo kiosko en la Pi
+
+```bash
+./create_desktop_shortcut.sh    # genera KioskoEcoLuna.desktop en el escritorio
+```
+
+Abre Chromium en pantalla completa apuntando a `http://localhost:8000`.
 
 ---
 
-## Roles y Superadministrador
+## 5. Variables de entorno (`.env`)
 
-- `Moi` y `David`: **superadmins** (acceso a `/admin/superadmin` y al CRUD de servicios).
-- `Capi`: admin normal (operativo, autoservicio, personalizado; no ve el superadmin).
-- Definido en `src/web_app/services/auth.py:SUPERADMINS`.
-- `es_superadmin()` consulta el usuario actual de la sesión.
+```env
+# Bypass / cortesía
+BYPASS_PASSWORD=admin123
 
-## Servicios Data-Driven (catálogo en DB)
+# Mercado Pago Point (terminal física)
+MP_ENVIRONMENT=prod
+MP_PROD_TOKEN=APP_USR-...
+MP_TEST_TOKEN=APP_USR-...
+MP_TERMINAL_ID=NEWLAND_N950__N950NCC904817363
+```
 
-Desde esta branch, el catálogo de servicios **vive en la tabla `servicios`** de SQLite en vez de estar hardcoded en `models.py`. El kiosko lee en cada render y los cambios se reflejan al instante.
+`.env` está en `.gitignore`. `.env.example` documenta las claves esperadas.
 
-### Tabla `servicios`
+---
 
-| Columna | Tipo | Descripción |
+## 6. Modelo de dominio
+
+### 6.1 Enums (en `core/estados.py`)
+
+| Enum | Valores | Notas |
 |---|---|---|
-| `id` | INTEGER PK | |
-| `codigo` | TEXT UNIQUE | Identificador lógico (`autolavado`, `secado`, `pers_ropa`, `pers_edredon`) |
-| `nombre` | TEXT | Visible al cliente |
-| `modalidad` | TEXT | `autoservicio` o `personalizado` |
-| `icono` | TEXT | Path SVG |
-| `tipo_calculo` | TEXT | `fijo`, `por_kg`, `por_duracion` |
-| `precio_fijo` | INTEGER | Para `fijo` y `por_duracion` |
-| `tarifa_por_kg` | REAL | Para `por_kg` |
-| `duracion_min` | INTEGER | Duración estimada del ciclo |
-| `limite_kg` | INTEGER | NULL = sin límite |
-| `tipos_equipo` | TEXT | CSV de tipos: `mixto,lavado,secado` |
-| `orden` | INTEGER | Posición en pantalla |
-| `activo` | INTEGER | 0/1, soft delete |
+| `EstadoOrden` | `PENDIENTE_PESO`, `PROCESANDO_PAGO`, `PENDIENTE_PAGO`, `PENDIENTE`, `EN_CURSO`, `FINALIZADO`, `CANCELADO` | Cambia solo vía `core.transiciones.aplicar()`. |
+| `Modalidad` | `AUTOSERVICIO`, `PERSONALIZADO`, `AUTOSERVICIO_MONEDAS`, `AUTOSERVICIO_POINT`, `AUTOSERVICIO_MOSTRADOR`, `PERSONALIZADO_MONEDAS`, `PERSONALIZADO_POINT`, `PERSONALIZADO_MOSTRADOR`, `BYPASS` | Calculada, no concatenada con f-strings. |
+| `MetodoPago` | `MONEDAS`, `POINT`, `MOSTRADOR` | Catálogo cerrado. |
+| `EtapaKanban` | `RECIBIDO`, `ALISTANDO`, `LISTO_ENTREGA` | Para órdenes en `Pendiente` que pasan al panel personalizado. |
+| `TipoCalculo` | `FIJO`, `POR_KG`, `POR_DURACION` | Cómo se cobra un servicio o segmentación. |
 
-Seed inicial: 4 servicios (Autolavado $45 fijo, Secado $50 fijo, Pers-Ropa $30/kg, Pers-Edredones $150 fijo). Solo se inserta si la tabla está vacía.
+**Regla:** Cero comparaciones con strings para cualquiera de estos enums. `if orden.modalidad == Modalidad.AUTOSERVICIO_POINT`, nunca `if "point" in modalidad`.
 
-### Funciones clave
+### 6.2 Transiciones (`core/transiciones.py`)
 
-- `cargar_servicios(solo_activos=True) -> list[ServicioInfo]` — recarga cada vez que se llama.
-- `get_servicio_por_codigo(codigo) -> ServicioInfo | None` — para `state.seleccionar_servicio(codigo)`.
-- `calcular_precio(servicio, peso_kg) -> int` — devuelve el precio final según `tipo_calculo`.
-- `database_web.listar_servicios_async()`, `obtener_servicio_por_codigo_async()`, `actualizar_servicio_async()`.
+```
+PENDIENTE_PESO ──(peso aprobado)──> PROCESANDO_PAGO
+PENDIENTE_PESO ──(cancelar)──────> CANCELADO
 
-### Compatibilidad
+PROCESANDO_PAGO ──(pago monedas)──> PENDIENTE
+PROCESANDO_PAGO ──(iniciar Point)─> PENDIENTE_PAGO
+PROCESANDO_PAGO ──(mostrador)────> PENDIENTE_PAGO
+PROCESANDO_PAGO ──(cancelar)─────> CANCELADO
 
-`SERVICIOS_AUTO`, `SERVICIOS_PERSONALIZADO` y `SERVICIOS` ahora son **funciones** (callables) que invocan `cargar_servicios()`. El código que hacía `from models import SERVICIOS_AUTO` debe usar `SERVICIOS_AUTO()` o migrar a `cargar_servicios()`. `state.seleccionar_servicio(nombre)` cambió a `state.seleccionar_servicio(codigo)`.
+PENDIENTE_PAGO ──(pago confirmado)─> PENDIENTE
+PENDIENTE_PAGO ──(expirar/cancelar)> CANCELADO
 
-## Estado del branch
+PENDIENTE ──(asignar máquina + iniciar)──> EN_CURSO
+PENDIENTE ──(cancelar)──────────────────> CANCELADO
 
-- ✅ Segment 1: Servicios data-driven sin CRUD.
-- ✅ Segment 2: Tabla `segmentaciones` y nuevo paso en kiosko.
-- ✅ Segment 3: CRUD de servicios y segmentaciones en `/admin/superadmin`.
-- ✅ Segment 4: Tabla `maquinas` y `hardware.py` data-driven.
-- ✅ Segment 4.5: Respaldo de fábrica (default snapshot).
-- ✅ Segment 5: Métricas con Highcharts en `/admin/superadmin`.
-- ✅ Segment 6: Cortes de caja en `/admin/cortes`.
-
-## Estado final (merged to main)
-
-Rama `feature/servicios-db-driven` mergeada con `--no-ff`. 3 commits en main:
-1. `7604399` — Cortes de caja (lógica + UI).
-2. `9f3d963` — Fix RuntimeWarning y favicon data URL.
-3. `f9870c4` — Merge commit.
-
-## Cortes de Caja
-
-Ruta: `/admin/cortes`. Accesible para **todos los admins autenticados**. Tarjeta en el dashboard admin para todos.
-
-### Tablas
-
-- `cortes_caja` — el ciclo de apertura/cierre con saldo inicial, real, esperado y diferencia.
-- `movimientos_caja` — todos los ingresos y egresos manuales y automáticos.
-
-### Flujo
-
-1. **Abrir caja** (solo superadmin + `BYPASS_PASSWORD`): se registra saldo inicial.
-2. **Movimientos durante el turno**: cualquier admin/socio/superadmin registra ingresos o egresos con tipo, monto y concepto predefinido. No requiere `BYPASS_PASSWORD`.
-3. **Cerrar caja** (solo superadmin + `BYPASS_PASSWORD`): se ingresa el efectivo contado, sistema calcula esperado vs real, guarda diferencia y notas.
-4. **Historial**: tabla de cortes cerrados con sus datos y notas.
-
-### Auto-registro
-
-Cuando un admin confirma un pago en efectivo desde el panel operativo (`confirmar_pago` con modalidad `pendiente-pago` o `mostrador`), el sistema crea automáticamente un movimiento de **ingreso** en el corte activo, con el monto y la descripción del servicio. Esto evita que el operador tenga que registrar manualmente cada pago de personalizado. Los **cambios** dados al cliente se siguen registrando manualmente como egreso "Cambio a cliente".
-
-### Archivos
-
-- `database_web.py` — tablas `cortes_caja` y `movimientos_caja` con índices, 6 helpers (`obtener_corte_activo`, `abrir_corte`, `cerrar_corte`, `listar_cortes`, `registrar_movimiento`, `listar_movimientos`).
-- `pages/admin_cortes.py` — la página completa con 3 secciones.
-- `pages/admin_operativo.py` — auto-registro de movimiento al confirmar pago mostrador.
-- `pages/admin_dashboard.py` — tarjeta "Cortes de Caja" para todos los admins.
-
-## Métricas con Highcharts
-
-Tab "Métricas" en `/admin/superadmin`. Usa `nicegui_highcharts` (instalado en el venv). Filtro de rango arriba: "Todo el historial", "Últimos 7 días", "Último mes", "Últimos 3 meses", "Último año".
-
-### KPIs (cards superiores)
-
-4 métricas globales: órdenes totales, recaudado, kilos lavados, promedio kg/orden.
-
-### Gráficos
-
-1. **Uso por máquina** — pie chart, número de servicios por `id_equipo`.
-2. **Horas pico del día** — column chart, 24 buckets (00:00-23:00).
-3. **Días pico de la semana** — column chart, 7 buckets (Dom-Sáb).
-4. **Consumo promedio por servicio** — bar chart con doble eje Y (kg prom y monto prom).
-5. **Tasa de uso efectivo vs tarjeta** — stacked column por mes. Mapeo: `monedas`→Efectivo, `point`→Tarjeta (Point), `terminal`→Tarjeta (Terminal), `pendiente-pago`/`mostrador`→Efectivo (mostrador).
-
-### Helpers en `database_web.py`
-
-- `reporte_uso_por_maquina_async(desde, hasta)` — `[{id_equipo, n_servicios, total_kg, total_min}]`
-- `reporte_horas_pico_async(desde, hasta)` — 24 buckets `[{hora, n}]`
-- `reporte_dias_pico_async(desde, hasta)` — 7 buckets `[{dow, nombre, n}]`
-- `reporte_consumo_promedio_async(desde, hasta)` — `[{tipo_servicio, n, kg_prom, kg_total, monto_prom, monto_total}]`
-- `reporte_tasa_pago_async(desde, hasta)` — `[{mes, Efectivo, Tarjeta (Point), Tarjeta (Terminal), Efectivo (mostrador), n, monto_total}]`
-- `reporte_resumen_async(desde, hasta)` — `{n_orden, recaudado, kg_total, kg_prom}`
-
-Las funciones aceptan fechas como string `YYYY-MM-DD` o vacío para "todo el historial". Filtra automáticamente estados no finalizados (`Pendiente-peso`).
-
-## Respaldo de fábrica (default snapshot)
-
-El primer `init_db()` guarda un snapshot automático de los catálogos data-driven (`servicios`, `segmentaciones`, `maquinas`) en la tabla `_backup_default`. El superadmin puede:
-
-- **Crear respaldo ahora**: sobrescribe el snapshot con el estado actual. Útil cuando ya configuraste el catálogo a tu gusto y quieres que ese sea el nuevo "punto de retorno".
-- **Restaurar valores por defecto**: borra el estado actual de los 3 catálogos y los reemplaza con el snapshot. Las órdenes históricas **no** se tocan. Requiere `BYPASS_PASSWORD`.
-
-### Tabla `_backup_default`
-
-| Columna | Tipo | Descripción |
-|---|---|---|
-| `tabla` | TEXT PK | `servicios`, `segmentaciones` o `maquinas` |
-| `datos` | TEXT (JSON) | Snapshot serializado de todas las filas |
-| `created_at` | TEXT | Fecha del último respaldo |
-| `nota` | TEXT | Motivo (ej. "Respaldo manual") |
-
-### Helpers en `database_web.py`
-
-- `listar_backups_async()` — devuelve metadata de los 3 snapshots.
-- `obtener_backup_async(tabla)` — devuelve el dict completo con `datos: list[dict]`.
-- `crear_backup_async(tabla, nota)` — sobrescribe el snapshot de una tabla.
-- `crear_backup_completo_async(nota)` — sobrescribe los 3.
-- `restaurar_backup_async(tabla) -> (ok, n_filas)` — borra y reinserta.
-- `restaurar_backup_completo_async()` — restaura los 3.
-
-## Máquinas (catálogo de hardware)
-
-El catálogo de máquinas (lavadoras, secadoras) vive en la tabla `maquinas` de SQLite. `hardware.EQUIPOS` se carga de la DB al primer acceso y se cachea en memoria.
-
-### Tabla `maquinas`
-
-| Columna | Tipo | Descripción |
-|---|---|---|
-| `id` | INTEGER PK | |
-| `codigo` | TEXT UNIQUE | Identificador lógico (`lavasecadora_1`) |
-| `nombre` | TEXT | Visible al admin |
-| `tipo` | TEXT | `mixto` / `lavado` / `secado` / `doblado` |
-| `capacidad_kg` | INTEGER | Capacidad de carga |
-| `gpio` | INTEGER | Pin BCM en la Raspberry |
-| `modo` | TEXT | `pulso` (0.5s) o `sostenido` (HIGH continuo) |
-| `duracion_max_min` | INTEGER | Tiempo máx. de seguridad para modo sostenido |
-| `orden` | INTEGER | Posición en panel |
-| `activa` | INTEGER | 0/1, soft delete |
-
-Seed inicial: 4 máquinas (lavasecadora 1-3 + secadora 1). Solo se inserta si la tabla está vacía.
-
-### API de hardware.py
-
-`EQUIPOS` ahora es un **proxy dinámico** que lee del cache:
-
-```python
-# Antes (sigue funcionando):
-eq = hardware.EQUIPOS["lavasecadora_1"]
-for codigo, eq in hardware.EQUIPOS.items():
-    ...
-
-# Nuevo: forzar recarga desde la DB tras editar
-hardware.recargar_equipos()
+EN_CURSO ──(completar)──> FINALIZADO
 ```
 
-- `get_equipos() -> dict` — devuelve el cache, lo carga de la DB si está vacío.
-- `recargar_equipos() -> dict` — fuerza recarga (llamar después de editar desde el superadmin).
+`core.transiciones.aplicar(orden, evento) -> Orden` es la **única** función que muta `orden.estado`. Lanza `TransicionInvalida` si la combinación no está permitida.
 
-**Importante:** al agregar una nueva máquina con un GPIO diferente, **reiniciar el kiosko** para que `init_gpio_lavadoras()` haga el setup del pin. El sistema avisa de esto en el `ui.notify` tras crear.
+### 6.3 Orden (`core/orden.py`)
 
-### Validación de GPIO
+Dataclass inmutable. Se reconstruye con `dataclasses.replace()` en cada transición.
 
-La DB no enforce unique en GPIO (puede haber dos máquinas con el mismo GPIO si una está desactivada). La validación la hace la UI al crear/editar (`existe_gpio_async(gpio, id_excluir)`). La UI muestra el error antes de intentar el UPDATE.
+Campos:
+- `id: int` (None si aún no se persiste)
+- `servicio_codigo: str`
+- `segmentacion_id: int | None`
+- `modalidad: Modalidad`
+- `peso_kg: float | None`
+- `peso_real_kg: float | None`
+- `monto: int`
+- `metodo_pago: MetodoPago | None`
+- `estado: EstadoOrden`
+- `etapa_kanban: EtapaKanban | None`
+- `maquina_codigo: str | None`
+- `nombre_cliente: str`
+- `mp_order_id: str | None` (Point)
+- `folio_terminal: str | None` (terminal física)
+- `created_at: datetime`
+- `updated_at: datetime`
 
-### CRUD en `/admin/superadmin`
+### 6.4 Servicios y segmentaciones
 
-Tab **Máquinas** (entre Segmentaciones y Calculadora). Botones:
+- **Servicios** viven en la tabla `servicios` (catálogo data-driven). Se cargan en cada `cargar_servicios()` (sin cache import-time).
+- **Segmentaciones** son variantes de un servicio. Mismo cálculo de precio vía `core/precio.calcular_precio()`.
+- La unión es polimórfica: una función `calcular_precio(item, peso)` acepta un `Servicio` o una `Segmentacion` indistintamente.
 
-- **+ Crear máquina** — diálogo con código, nombre, tipo, GPIO, capacidad, modo, duración máx sostenido. Valida GPIO duplicado y código único.
-- **✎ Editar** — diálogo con todos los campos, incluye checkbox de activa.
-- **⏸/▶ Activar/Desactivar** — soft delete.
-- **🗑 Eliminar** — diálogo de confirmación con `BYPASS_PASSWORD`. Hard delete solo si no hay órdenes históricas con esa máquina; si las hay, devuelve `False` y se debe desactivar.
+Tipos de cálculo:
+- `FIJO` — `precio_fijo` directamente.
+- `POR_KG` — `tarifa_por_kg * peso`.
+- `POR_DURACION` — `precio_fijo` (placeholder, no se usa actualmente).
 
-### Archivos
+### 6.5 Máquinas
 
-- `database_web.py` — tabla `maquinas` con migración, helpers (`listar_maquinas_async`, `obtener_maquina_por_codigo_async`, `crear_maquina_async`, `actualizar_maquina_async`, `eliminar_maquina_hard_async`, `existe_gpio_async`).
-- `hardware.py` — `EQUIPOS` como proxy dinámico, `get_equipos()`, `recargar_equipos()`. El resto del código no requiere cambios porque la API del dict se mantiene.
-- `pages/admin_superadmin.py` — tab Máquinas con CRUD completo.
+Catálogo en la tabla `maquinas`. `core/maquinas.py` expone `EQUIPOS` como cache lazy + `recargar_equipos()` para forzar recarga tras un CRUD del superadmin.
 
-## Panel Superadministrador
+Campos relevantes: `codigo`, `nombre`, `tipo` (`mixto`/`lavado`/`secado`/`doblado`), `capacidad_kg`, `gpio` (pin BCM), `modo` (`pulso`/`sostenido`), `duracion_max_min` (solo para `sostenido`).
 
-Ruta: `/admin/superadmin`. Acceso restringido con `redirigir_si_no_superadmin()` (solo `Moi` y `David`). Visible como tarjeta en el dashboard admin cuando el usuario actual es superadmin.
+**Importante:** al crear o cambiar el GPIO de una máquina, **reiniciar la Pi** para que `adaptadores/hardware/gpio.py` haga `setup()` del pin nuevo.
 
-### Tabs
+---
 
-1. **Servicios y Tarifas**: lista los 4 servicios con su tipo de cálculo, precio, duración, límite y tipos de equipo. Botones:
-   - **✎ Editar**: abre un diálogo con todos los campos editables y un preview en vivo del precio. Requiere `BYPASS_PASSWORD` para confirmar.
-   - **⏸/▶ Activar/Desactivar**: soft delete, no afecta órdenes históricas.
+## 7. Capa de persistencia (`repo/`)
 
-2. **Segmentaciones**: agrupa por servicio, lista todas las segmentaciones. Editar/activar con el mismo patrón.
+- `db.py` se conecta a `data/ecoluna_datos.db` con `WAL`. Crea/migra todas las tablas de forma idempotente al primer `init_db()`.
+- Cada tabla tiene su módulo (`transacciones.py`, `servicios.py`, etc.) con funciones nombradas `<verbo>_<entidad>` (`listar_pendientes`, `obtener_por_codigo`, `crear_orden`, `actualizar_estado`, …).
+- `_row_a.py` centraliza el mapeo de filas SQLite a dataclasses. Ningún otro archivo hace `dict(row)` para construir modelos.
+- Las queries async exponen `_sync` y `_async`; las páginas NiceGUI usan siempre la versión `async` con `asyncio.to_thread` o `run_in_executor`.
 
-3. **Calculadora**: herramienta de preview que simula el precio de un servicio o segmentación con un peso dado. Útil para responderle al cliente en mostrador. Disponible también para admins normales (útil para cualquier operador).
+**Migraciones:** son aditivas. Si una columna nueva no existe, se añade con `ALTER TABLE`. Nunca se borran columnas en producción.
 
-### Segunda barrera
+---
 
-Todos los cambios (servicios y segmentaciones) requieren confirmar con la contraseña de bypass (`BYPASS_PASSWORD`, default `admin123`). Si la contraseña no coincide, se muestra una notificación negativa y no se aplica el cambio.
+## 8. Hardware y adaptadores
 
-### Cambios al instante
+### 8.1 GPIO (`adaptadores/hardware/`)
 
-El kiosko y el panel operativo leen la DB en cada render, por lo que cualquier cambio en servicios/segmentaciones se refleja al instante. No requiere reiniciar el kiosko.
+- `gpio.py` — `init_gpio_lavadoras()` (configura cada pin en `LOW`), `limpiar_pines()` (al apagar la app).
+- `monedero.py` — `LectorMonedas(callback)` escucha el pin 21 con debounce de 300 ms. En modo test, ignora GPIO y acepta pulsos por teclado (`1`/`2`/`5`/`0`).
+- `maquinas_pin.py` — `ControlMaquinas.activar(codigo)`, `activar_con_duracion(codigo, min)`, `apagar(codigo)`, `recuperar()`. Maneja modo `pulso` (HIGH 0.5s) y `sostenido` (HIGH continuo + tarea asyncio de auto-apagado).
 
-### Estructura
+### 8.2 Recuperación tras apagón
 
-- `src/web_app/pages/admin_superadmin.py` — la página completa con sus 3 tabs.
-- `src/web_app/pages/admin_dashboard.py` — agrega la tarjeta "Superadmin" condicional.
-- `src/web_app/services/auth.py:redirigir_si_no_superadmin()` — guarda de acceso.
+`adaptadores/hardware/gpio.py:recuperar_maquinas_sostenidas()` se llama en `app.on_startup`. Lee las órdenes en `EN_CURSO`:
+- Si el tiempo transcurrido supera la `duracion_max_min`, marca la orden como `FINALIZADO`.
+- Si no, reprograma el auto-apagado con el tiempo restante.
 
-## Segmentaciones (catálogo anidado)
+---
 
-Una segmentación es una **variante** dentro de un servicio. Ejemplos:
-- "Personalizado – Ropa" tiene "Lava + Seca + Dobla", "Solo Lava + Exprime", "Lava + Seca".
-- "Personalizado – Edredones" tiene "Lava + Seca", "Solo Lavado".
+## 9. Mercado Pago
 
-### Tabla `segmentaciones`
+### 9.1 Cliente (`adaptadores/mercado_pago/cliente.py`)
 
-| Columna | Tipo | Descripción |
+Funciones bloqueantes (se llaman con `asyncio.to_thread`):
+- `crear_orden_point(amount, descripcion, external_ref, retry_on_409=True) -> dict`
+- `consultar_orden(order_id) -> dict`
+- `cancelar_orden(order_id) -> bool` (best-effort; la N950 no responde a cancelaciones por API)
+- `listar_terminales() -> list`
+
+El token se elige según `MP_ENVIRONMENT` (`prod` o `test`). Si `MP_ENVIRONMENT=prod` y `MP_PROD_TOKEN` está vacío, se hace fallback a `MP_TEST_TOKEN` con un warning.
+
+### 9.2 Polling de Point (`adaptadores/mercado_pago/polling.py`)
+
+Tarea asyncio que cada 5 segundos:
+1. Lee órdenes con `estado == PENDIENTE_PAGO` y `modalidad in (AUTOSERVICIO_POINT, PERSONALIZADO_POINT)`.
+2. Consulta el estado en MP.
+3. Si `status == "paid"`: extrae `transactions.payments[0].id` como folio, llama a `core.transiciones.aplicar(orden, PAGO_CONFIRMADO)`, persiste y publica `PagoConfirmado` en el bus.
+4. Si `status in ("expired", "cancelled")`: cancela la orden local y notifica al kiosko.
+
+Arranca en `app.on_startup` y se detiene en `app.on_shutdown`.
+
+### 9.3 Punto Point (terminal física)
+
+- El cliente elige "Pago con Point" en el kiosko.
+- `adaptadores/mercado_pago/point.py:crear_orden_point()` envía la orden a la terminal NEWLAND N950 con `expiration_time=PT5M`.
+- El kiosko muestra overlay "Procesando pago con Point".
+- El polling confirma automáticamente (sin intervención del operador).
+- Si el cliente presiona "Regresar", se intenta `cancelar_orden()` best-effort; si falla, hay que cancelar manualmente en la terminal.
+
+---
+
+## 10. Bus de eventos (`eventos/`)
+
+`Bus` es un pub/sub en proceso. Cada suscriptor abre un `asyncio.Queue` por tipo de evento.
+
+```python
+bus = Bus()
+
+# Productor (en core/ o adaptadores/)
+await bus.publish(PagoConfirmado(orden_id=42))
+
+# Consumidor (en ui/)
+cola = bus.subscribe("pago.confirmado")
+async for evento in cola:
+    refrescar_pantalla(evento.orden_id)
+```
+
+Reemplaza los 3 sets de callbacks (`_operativo_refresh_callbacks`, etc.) y los 2 dicts de clients (`_admin_clients`, `_kiosko_clients`) que existían en `services/notifications.py`.
+
+Tipos de evento (en `eventos/tipos.py`): `OrdenCreada`, `PesoAprobado`, `PesoRechazado`, `PagoConfirmado`, `MaquinaAsignada`, `CicloIniciado`, `OrdenFinalizada`, `OrdenCancelada`.
+
+---
+
+## 11. UI NiceGUI
+
+### 11.1 Reglas
+
+- Las páginas **nunca** importan de `core/`, `repo/` o `adaptadores/` directamente para mutar estado. Siempre llaman a una función de `core/` o esperan un evento del bus.
+- Toda mutación de UI tras una acción async va por el bus, no por callbacks anidados.
+- Cero SQL en la UI. Cero `from gpiozero` en la UI. Cero `import requests` en la UI.
+- Los componentes reutilizables viven en `ui/compartido/_componentes.py`:
+  - `tarjeta_orden(v: dict, *, acciones: list[Accion])` — una sola implementación para los 3 paneles operativos.
+  - `badge_modalidad(m: Modalidad)`, `badge_metodo_pago(m: MetodoPago)`, `badge_servicio(s: str)` — funciones puras, devuelven HTML o un nodo NiceGUI.
+  - `dialogo_bypass(on_autorizar)` — reutilizable entre admin operativo y superadmin.
+
+### 11.2 Rutas
+
+| Ruta | Acceso | Descripción |
 |---|---|---|
-| `id` | INTEGER PK | |
-| `servicio_id` | INTEGER FK | Referencia a `servicios.id` (CASCADE) |
-| `codigo` | TEXT | Identificador lógico único por servicio |
-| `nombre` | TEXT | Visible al cliente |
-| `descripcion` | TEXT | Texto explicativo |
-| `tipo_calculo` | TEXT | `fijo` / `por_kg` / `por_duracion` |
-| `precio_fijo` | INTEGER | Para `fijo` y `por_duracion` |
-| `tarifa_por_kg` | REAL | Para `por_kg` |
-| `duracion_min` | INTEGER | Duración estimada |
-| `orden` | INTEGER | Posición en pantalla |
-| `activo` | INTEGER | 0/1, soft delete |
+| `/` | público | Pantalla del cliente (5 pasos del wizard). |
+| `/admin/login` | público | Login con usuario + contraseña. |
+| `/admin` | autenticado | Dashboard con tarjetas de acceso. |
+| `/admin/operativo` | autenticado | Bypass, cambio de usuario, kanban de pendientes. |
+| `/admin/autoservicio` | autenticado | Aprobar peso, asignar máquina, iniciar ciclo. |
+| `/admin/personalizado` | autenticado | Recepción, alistamiento, entrega. |
+| `/admin/superadmin` | superadmin | Servicios, segmentaciones, máquinas, calculadora, métricas, respaldo. |
+| `/admin/cortes` | autenticado | Abrir caja, registrar movimientos, cerrar caja, historial. |
 
-UNIQUE(`servicio_id`, `codigo`). Seed inicial: 3 segmentaciones para `pers_ropa` y 2 para `pers_edredon`.
+### 11.3 Wizard del cliente
 
-### Flujo del kiosko
+`ui/kiosko/wizard.py` controla el flujo. 5 pasos:
+- `0` — Selección de servicio (mostrando_sub_lavar para "Lavar")
+- `1` — Ingreso de nombre
+- `2` — Peso (con sub-estado `mostrando_segmentaciones` si el servicio tiene variantes)
+- `3` — Selección de método de pago + cobro
+- `4` — Éxito (auto-reset a los 7s)
 
-1. Cliente selecciona servicio en paso 0.
-2. Ingresa peso en paso 2.
-3. **Si el servicio tiene segmentaciones**, paso 2.5 muestra las opciones con precio calculado en vivo.
-4. Cliente elige segmentación → paso 3 (métodos de pago).
-5. **Si el servicio NO tiene segmentaciones**, va directo de paso 2 a paso 3.
+Sub-estados (banderas booleanas, no floats en `paso_actual`):
+- `mostrando_sub_lavar`
+- `mostrando_segmentaciones`
+- `mostrando_metodos_pago`
+- `esperando_admin` (con `motivo: "peso" | "pago"`)
 
-### Cálculo de precio
+---
 
-`calcular_precio(item, peso_kg)` funciona idéntico para `ServicioInfo` y `SegmentacionInfo`. La función `state.get_item_cobro()` devuelve la segmentación si está seleccionada, si no el servicio.
+## 12. Operación
 
-### Helpers en `models.py`
+### 12.1 Flujo del cliente (autoservicio)
 
-- `SegmentacionInfo` (dataclass).
-- `cargar_segmentaciones(servicio_id=None, solo_activos=True) -> list[SegmentacionInfo]`.
-- `get_segmentacion_por_id(id_seg) -> SegmentacionInfo | None`.
-- `format_precio(item, peso_kg) -> str` — formato visual (`$45` o `$30/kg`).
+1. Selecciona servicio (Autolavado / Secado / Personalizado).
+2. Ingresa nombre.
+3. Si es personalizado y tiene segmentaciones, elige una.
+4. Ingresa peso.
+5. Orden queda en `PENDIENTE_PESO` y se notifica al admin.
+6. Admin aprueba peso → kiosko muestra métodos de pago.
+7. Cliente elige método y completa el pago.
+8. Orden pasa a `PENDIENTE` (lista para asignar máquina).
+9. Admin asigna máquina e inicia ciclo → `EN_CURSO`.
+10. Al terminar, `FINALIZADO`.
 
-### En el admin
+### 12.2 Flujo del cliente (personalizado)
 
-Cuando se completa el pago, `finalizar_pago` concatena el nombre de la segmentación al `tipo_servicio` (ej. "Personalizado – Ropa · Lava + Seca + Dobla") para que el admin lo vea en sus tarjetas.
-Ver `agent_notation/icons_todo.md` para mapeo completo por línea y consejos de implementación.
+Igual pero:
+- El cliente no paga en el kiosko (queda en `PENDIENTE_PAGO` con `metodo_pago=mostrador`).
+- El operador cobra en mostrador, registra el pago → `PENDIENTE`.
+- La ropa entra al kanban de personalizado: `RECIBIDO` → `ALISTANDO` → `LISTO_ENTREGA`.
+
+### 12.3 Cortes de caja
+
+- **Abrir** (superadmin + `BYPASS_PASSWORD`): saldo inicial.
+- **Movimientos** durante el turno: cualquier admin registra ingresos o egresos.
+- **Auto-registro**: al confirmar un pago en efectivo desde el panel operativo, se crea un movimiento de ingreso automáticamente.
+- **Cerrar** (superadmin + `BYPASS_PASSWORD`): efectivo contado, sistema calcula esperado vs real, guarda diferencia y notas.
+- **Historial**: tabla de cortes cerrados.
+
+### 12.4 Métricas (Highcharts)
+
+Tab "Métricas" en `/admin/superadmin`. Filtros de rango: todo, 7d, 30d, 90d, 1y.
+
+- **KPIs**: órdenes totales, recaudado, kilos lavados, kg/orden promedio.
+- **Gráficos**: uso por máquina, horas pico (24 buckets), días pico (7 buckets), consumo promedio por servicio, tasa efectivo vs tarjeta (mensual stacked column).
+
+### 12.5 Respaldo de fábrica
+
+Snapshot automático al primer `init_db()`. El superadmin puede:
+- **Crear respaldo ahora** — sobrescribe con el estado actual.
+- **Restaurar valores por defecto** — requiere `BYPASS_PASSWORD`. Borra y reinserta los 3 catálogos desde el snapshot. Las órdenes históricas **no** se tocan.
+
+---
+
+## 13. Convenciones de código
+
+- **Python 3.9+**, type hints donde aportan claridad.
+- **4 espacios** de indentación, **~120 caracteres** máx. por línea.
+- **Dataclasses** para modelos de datos.
+- **Enums** en lugar de strings mágicos.
+- **Imports**: stdlib → third-party → local. Sin wildcards.
+- **Async**: las páginas NiceGUI son `async`. Las funciones de DB y MP se ejecutan con `asyncio.to_thread` o `run_in_executor`.
+- **CSS**: las clases siguen BEM-ish (`.orden-card`, `.orden-card__nombre`). Viven en `ui/compartido/estilos.py` como strings.
+- **Iconos**: SVGs en `media/icons/`, jamás emojis (problema de fuentes en la Pi).
+- **Comentarios**: docstrings en funciones públicas. Inline solo donde el "por qué" no es obvio.
+
+---
+
+## 14. Glosario
+
+| Término | Significado |
+|---|---|
+| **Kiosko** | Pantalla táctil del cliente. |
+| **Wizard** | Flujo de 5 pasos que sigue el cliente. |
+| **Orden** | Una transacción pendiente, en curso o finalizada. |
+| **Punto Point** | Terminal física Mercado Pago NEWLAND N950. |
+| **Bypass** | Servicio de cortesía (lavado gratis). Requiere `BYPASS_PASSWORD`. |
+| **Corte de caja** | Ciclo de apertura → movimientos → cierre con arqueo. |
+| **Kanban** | Vista de 3 columnas (Recibido / Alistando / Listo) en `/admin/personalizado`. |
+| **Segmentación** | Variante de un servicio (ej. "Lava + Seca + Dobla" dentro de Personalizado Ropa). |
+| **Respaldo de fábrica** | Snapshot JSON de los 3 catálogos para restaurarlos a un estado conocido. |
