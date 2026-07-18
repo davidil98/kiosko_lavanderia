@@ -4,6 +4,7 @@ Kanban de 3 columnas (Recibido / Alistando / Listo para Entrega) para
 las órdenes con modalidad `personalizado`.
 """
 
+import asyncio
 from datetime import datetime
 
 from nicegui import ui
@@ -81,7 +82,39 @@ async def admin_personalizado():
         with ui.element("div").props("id=personalizado-contenido"):
             await contenido()
 
-    ui.timer(3.0, contenido.refresh)
+    # NO usamos ui.timer() con .refresh() porque regresa el scroll al
+    # inicio. Refrescamos solo cuando hay eventos del bus.
+    from app.eventos.bus import bus
+    from app.eventos.tipos import (
+        TIPO_ORDEN_CREADA,
+        TIPO_ORDEN_CANCELADA,
+        TIPO_ORDEN_FINALIZADA,
+        TIPO_PAGO_CONFIRMADO,
+    )
+
+    colas = [
+        bus.subscribe(t)
+        for t in (
+            TIPO_ORDEN_CREADA,
+            TIPO_ORDEN_CANCELADA,
+            TIPO_ORDEN_FINALIZADA,
+            TIPO_PAGO_CONFIRMADO,
+        )
+    ]
+
+    async def _consumir():
+        import asyncio
+
+        while True:
+            for cola in colas:
+                try:
+                    cola.get_nowait()
+                    contenido.refresh()
+                except Exception:
+                    pass
+            await asyncio.sleep(0.5)
+
+    asyncio.create_task(_consumir())
     boton_cerrar_sesion()
 
 

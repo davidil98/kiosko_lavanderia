@@ -17,7 +17,10 @@ from datetime import datetime
 from nicegui import ui
 
 from app.core import cortes as core_cortes
-from app.ui.admin._componentes import boton_cerrar_sesion, render_header
+from app.ui.admin._componentes import (
+    boton_cerrar_sesion,
+    render_header,
+)
 from app.ui.compartido.auth import es_superadmin, redirigir_si_no_autenticado
 
 
@@ -48,7 +51,31 @@ async def admin_cortes():
         with ui.element("div").props("id=cortes-contenido"):
             await contenido()
 
-    ui.timer(3.0, contenido.refresh)
+    # NO usamos ui.timer() con .refresh() porque regresa el scroll al
+    # inicio. Refrescamos solo cuando hay un corte nuevo o un
+    # movimiento. Como el bus no tiene eventos de cortes, usamos un
+    # timer MUY lento (10s) que solo refresca si el hash de movimientos
+    # cambia. Si nadie mueve dinero, no refresca.
+    _estado_corte: dict = {"id": None, "mov_hash": None}
+
+    async def _tick_cortes():
+        corte = await core_cortes.obtener_activo_async()
+        if corte is None:
+            cid, mh = None, 0
+        else:
+            movs = await core_cortes.listar_movimientos_async(corte["id"])
+            cid, mh = corte["id"], len(movs)
+        h = (cid, mh)
+        if _estado_corte["id"] is None and _estado_corte["mov_hash"] is None:
+            _estado_corte["id"] = cid
+            _estado_corte["mov_hash"] = mh
+            return
+        if h != (_estado_corte["id"], _estado_corte["mov_hash"]):
+            _estado_corte["id"] = cid
+            _estado_corte["mov_hash"] = mh
+            contenido.refresh()
+
+    ui.timer(10.0, lambda: asyncio.create_task(_tick_cortes()))
     boton_cerrar_sesion()
 
 

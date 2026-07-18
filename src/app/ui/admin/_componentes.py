@@ -188,3 +188,46 @@ def render_seccion(icon: str, titulo: str, items: list, render_item) -> None:
         return
     for v in items:
         render_item(v)
+
+
+# ── Auto-refresh inteligente (sin regresar al scroll) ─────────────────────
+
+
+def auto_refresh_smart(
+    refresh_callable,
+    hash_callable: Callable[[], int],
+    intervalo_s: float = 3.0,
+) -> None:
+    """Lanza un `ui.timer` que solo invoca `refresh_callable` cuando el
+    hash de `hash_callable()` cambia. Así, si nada cambia, NO se reemplaza
+    el DOM y el scroll del usuario se preserva.
+
+    Args:
+        refresh_callable: la función a llamar cuando hay cambios. Usualmente
+            `contenido.refresh` de un `ui.refreshable`.
+        hash_callable: una función sin argumentos que retorna un int/hash
+            representando el estado actual (e.g. número de órdenes pendientes).
+        intervalo_s: segundos entre checks.
+    """
+    estado_previo = {"hash": None, "ticks": 0, "refreshes": 0}
+
+    def _tick():
+        try:
+            h = hash_callable()
+        except Exception:
+            return
+        estado_previo["ticks"] += 1
+        if estado_previo["hash"] is None:
+            estado_previo["hash"] = h
+            print(f"[auto_refresh_smart] primer tick: hash={h}, NO refresca")
+            return  # No refrescar en el primer tick (ya se pintó al inicio)
+        if h != estado_previo["hash"]:
+            estado_previo["hash"] = h
+            estado_previo["refreshes"] += 1
+            print(
+                f"[auto_refresh_smart] cambio detectado: hash={h}, refrescando (#{estado_previo['refreshes']})"
+            )
+            refresh_callable()
+        # else: print(f"[auto_refresh_smart] sin cambios, no refresca")
+
+    ui.timer(intervalo_s, _tick)

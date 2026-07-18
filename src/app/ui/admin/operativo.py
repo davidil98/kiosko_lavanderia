@@ -141,11 +141,40 @@ async def admin_operativo():
         with ui.row().classes("w-full justify-end mt-4"):
             ui.button("Servicio de cortesía", icon="star", on_click=_abrir_bypass)
 
-    # El timer solo refresca el contenido (la lista de tarjetas), no
-    # el header ni el botón de bypass. Así el scroll del usuario se
-    # preserva porque la posición de scroll está asociada al contenedor
-    # padre, no al hijo refrescable.
-    ui.timer(3.0, contenido.refresh)
+    # NO usamos ui.timer() con .refresh() porque:
+    # 1. Reemplaza el DOM entero y regresa el scroll al inicio.
+    # 2. El usuario debe poder escribir en inputs sin que se cierre.
+    # 3. Las nuevas órdenes del kiosko cliente se notifican al bus,
+    #    y el bus tiene suscriptores en otros tabs. Aquí solo refrescamos
+    #    cuando hay un evento real del bus (en lugar de polling).
+    # Para forzar un refresh manual, el operador puede recargar F5.
+    from app.eventos.bus import bus
+    from app.eventos.tipos import (
+        TIPO_ORDEN_CREADA,
+        TIPO_ORDEN_CANCELADA,
+        TIPO_PAGO_CONFIRMADO,
+        TIPO_PESO_APROBADO,
+        TIPO_PESO_RECHAZADO,
+    )
+
+    cola_admin = bus.subscribe(TIPO_ORDEN_CREADA)
+    colas = [
+        bus.subscribe(t)
+        for t in (
+            TIPO_ORDEN_CANCELADA,
+            TIPO_PESO_APROBADO,
+            TIPO_PESO_RECHAZADO,
+            TIPO_PAGO_CONFIRMADO,
+        )
+    ]
+    colas.append(cola_admin)
+
+    async def _consumir_eventos_admin():
+        while True:
+            await cola_admin.get()
+            contenido.refresh()
+
+    asyncio.create_task(_consumir_eventos_admin())
 
     boton_cerrar_sesion()
 

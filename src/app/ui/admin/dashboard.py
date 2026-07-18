@@ -10,6 +10,8 @@
 Los contadores vienen de `repo/transacciones.contadores_pendientes()`.
 """
 
+import asyncio
+
 from nicegui import app, context, ui
 
 from app.repo import transacciones
@@ -122,6 +124,45 @@ async def admin_dashboard():
         with ui.element("div").props("id=dashboard-contenido"):
             await contenido()
 
-    # El timer solo refresca las tarjetas (los contadores), no el header.
-    ui.timer(5.0, contenido.refresh)
+    # NO usamos ui.timer() con .refresh() porque regresa el scroll al
+    # inicio. Refrescamos solo cuando hay eventos del bus.
+    from app.eventos.bus import bus
+    from app.eventos.tipos import (
+        TIPO_ORDEN_CREADA,
+        TIPO_ORDEN_CANCELADA,
+        TIPO_PAGO_CONFIRMADO,
+        TIPO_PESO_APROBADO,
+        TIPO_PESO_RECHAZADO,
+        TIPO_MAQUINA_ASIGNADA,
+        TIPO_ORDEN_FINALIZADA,
+        TIPO_PAGO_CANCELADO,
+    )
+
+    colas = [
+        bus.subscribe(t)
+        for t in (
+            TIPO_ORDEN_CREADA,
+            TIPO_ORDEN_CANCELADA,
+            TIPO_PAGO_CONFIRMADO,
+            TIPO_PESO_APROBADO,
+            TIPO_PESO_RECHAZADO,
+            TIPO_MAQUINA_ASIGNADA,
+            TIPO_ORDEN_FINALIZADA,
+            TIPO_PAGO_CANCELADO,
+        )
+    ]
+
+    async def _consumir():
+        import asyncio
+
+        while True:
+            for cola in colas:
+                try:
+                    cola.get_nowait()
+                    contenido.refresh()
+                except Exception:
+                    pass
+            await asyncio.sleep(0.5)
+
+    asyncio.create_task(_consumir())
     boton_cerrar_sesion()

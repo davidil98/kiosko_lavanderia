@@ -82,8 +82,8 @@ async def admin_superadmin():
             calculadora.render()
 
         @ui.refreshable
-        async def tab_metricas_content() -> None:
-            await metricas.render()
+        def tab_metricas_content() -> None:
+            metricas.render()
 
         @ui.refreshable
         def tab_respaldo_content() -> None:
@@ -99,7 +99,7 @@ async def admin_superadmin():
             with ui.tab_panel(tab_calculadora):
                 tab_calculadora_content()
             with ui.tab_panel(tab_metricas):
-                await tab_metricas_content()
+                tab_metricas_content()
             with ui.tab_panel(tab_respaldo):
                 tab_respaldo_content()
 

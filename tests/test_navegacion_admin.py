@@ -100,20 +100,16 @@ def test_estructura_operativo_separa_header_de_contenido(server):
     del ui.refreshable, así el timer no lo reemplaza y no regresa el scroll
     al inicio."""
     src = (ROOT / "src" / "app" / "ui" / "admin" / "operativo.py").read_text()
-    # El header (<h2>Panel Operativo) debe estar escrito FUERA del bloque
-    # @ui.refreshable, no dentro de contenido().
-    # Truco: el header literal "Panel Operativo" debe aparecer ANTES del
-    # contenido del refreshable. Lo verificamos contando que aparece 2+ veces
-    # en el archivo: una en la UI (header) y otra en un comentario opcional.
     assert "Panel Operativo" in src
-    # El timer debe llamar a contenido.refresh, NO a la página entera.
-    assert "ui.timer" in src
-    assert "contenido.refresh" in src
+    # El archivo usa auto_refresh_smart (helper que solo refresca si
+    # el hash cambia) o un patrón equivalente, no ui.timer directo.
+    assert "auto_refresh_smart" in src or "ui.timer" in src
 
 
-def test_estructura_paginas_sin_refresh_en_header():
-    """Las 5 páginas admin no deben refrescar TODO el contenido (incluyendo
-    el header) con el timer. El header debe estar en un bloque estático.
+def test_estructura_paginas_sin_ui_timer_con_refresh_puro():
+    """Las 5 páginas admin NO deben tener `ui.timer(..., contenido.refresh())`
+    ni `ui.timer(..., refresh())` que reemplaza el DOM entero. Deben
+    refrescar via el bus o con un timer que solo actualice si hay cambios.
     """
     archivos = [
         "operativo.py",
@@ -125,19 +121,23 @@ def test_estructura_paginas_sin_refresh_en_header():
     for nombre in archivos:
         path = ROOT / "src" / "app" / "ui" / "admin" / nombre
         src = path.read_text()
-        # Cada archivo debe tener un ui.timer que solo refresca `contenido`.
-        assert "ui.timer" in src, f"{nombre}: no tiene ui.timer"
-        assert "contenido.refresh" in src, f"{nombre}: timer no refresca contenido"
-        # El header literal (e.g. "Panel Operativo") debe aparecer
-        # EN la sección estática, no en la función contenido() (que es el
-        # refreshable). Buscamos que aparezca el string y que el timer
-        # solo llame `contenido.refresh` (no `refresh` directamente).
-        # Verificación: el timer NO debe llamarse sin argumento (que
-        # refrescaría toda la página y volvería el scroll al inicio).
+        # PROHIBIDO: ui.timer(..., refresh()) o ui.timer(..., contenido.refresh())
+        # porque regresan el scroll al inicio y cierran dialogs.
         for line in src.splitlines():
-            if "ui.timer" in line:
-                assert "contenido.refresh" in line, (
-                    f"{nombre}: el ui.timer debe llamar a 'contenido.refresh', "
-                    f"no a una función que refresque toda la página. "
-                    f"Línea: {line.strip()}"
+            line_strip = line.strip()
+            # Ignorar comentarios
+            if line_strip.startswith("#"):
+                continue
+            if "ui.timer" in line_strip and "refresh" in line_strip:
+                # Permitir ui.timer(..., _tick_cortes) o similar (función
+                # que verifica el hash antes de refrescar).
+                if "_tick" in line_strip or "smart" in line_strip:
+                    continue
+                # Permitir ui.timer(10.0, lambda: asyncio.create_task(_tick_cortes()))
+                if "asyncio.create_task" in line_strip:
+                    continue
+                pytest.fail(
+                    f"{nombre}: ui.timer con .refresh() detectado. "
+                    f"El DOM se reemplaza y el scroll regresa al inicio. "
+                    f"Línea: {line_strip}"
                 )

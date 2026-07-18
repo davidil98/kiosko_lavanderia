@@ -5,6 +5,7 @@ El operador ve las órdenes `Pendiente` y `En proceso` del modo autoservicio.
 - En proceso: marcar como completado.
 """
 
+import asyncio
 from datetime import datetime
 
 from nicegui import ui
@@ -89,7 +90,46 @@ async def admin_autoservicio():
         with ui.element("div").props("id=autoservicio-contenido"):
             await contenido()
 
-    ui.timer(3.0, contenido.refresh)
+    # NO usamos ui.timer() con .refresh() porque regresa el scroll al
+    # inicio y cierra dialogs abiertos. Refrescamos solo cuando hay
+    # eventos del bus (peso aprobado, pago confirmado, etc.).
+    from app.eventos.bus import bus
+    from app.eventos.tipos import (
+        TIPO_ORDEN_CREADA,
+        TIPO_ORDEN_CANCELADA,
+        TIPO_PAGO_CONFIRMADO,
+        TIPO_PESO_APROBADO,
+        TIPO_PESO_RECHAZADO,
+        TIPO_MAQUINA_ASIGNADA,
+        TIPO_ORDEN_FINALIZADA,
+    )
+
+    colas = [
+        bus.subscribe(t)
+        for t in (
+            TIPO_ORDEN_CREADA,
+            TIPO_ORDEN_CANCELADA,
+            TIPO_PAGO_CONFIRMADO,
+            TIPO_PESO_APROBADO,
+            TIPO_PESO_RECHAZADO,
+            TIPO_MAQUINA_ASIGNADA,
+            TIPO_ORDEN_FINALIZADA,
+        )
+    ]
+
+    async def _consumir():
+        import asyncio
+
+        while True:
+            for cola in colas:
+                try:
+                    cola.get_nowait()
+                    contenido.refresh()
+                except Exception:
+                    pass
+            await asyncio.sleep(0.5)
+
+    asyncio.create_task(_consumir())
     boton_cerrar_sesion()
 
 
