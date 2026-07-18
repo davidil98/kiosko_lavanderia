@@ -68,12 +68,10 @@ TEST_MODE = "test" in sys.argv
 
 
 def _favicon_data_url() -> str:
-    logo = MEDIA_DIR / "logo_slogan.png"
-    if not logo.exists():
-        return "🌙"
-    with open(logo, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode("ascii")
-    return f"data:image/png;base64,{b64}"
+    """Favicon pequeño. El dataURL de un PNG de 100KB inflaba el HTML
+    inicial y rompía el WebSocket de NiceGUI con 'Message too long'.
+    Usamos un emoji Unicode (4 bytes) que se envía inline."""
+    return "🌙"
 
 
 def _bootstrap() -> None:

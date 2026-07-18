@@ -69,6 +69,38 @@ def _guardar_wizard(w: WizardKiosko) -> None:
 
 @ui.page("/")
 def kiosko_cliente():
+    # Inicializar la DB y los loaders ANTES de renderizar. Si la DB ya
+    # existe (caso normal), `init_db()` es idempotente. Si el
+    # `@app.on_startup` aún no corrió, esto garantiza que el kiosko
+    # tenga servicios para mostrar desde el primer GET.
+    import sys
+    from app.repo import db as _db
+    from app.core import maquinas as _cm
+    from app.repo import maquinas as _repo_maquinas
+    from app.core import loader as _cat_loader
+
+    _db.init_db()
+    _cm.set_cargador(
+        lambda: {
+            m.codigo: _cm.Equipo(
+                codigo=m.codigo,
+                nombre=m.nombre,
+                tipo=m.tipo,
+                capacidad_kg=m.capacidad_kg,
+                gpio=m.gpio,
+                modo=m.modo,
+                duracion_max_min=m.duracion_max_min,
+            )
+            for m in _repo_maquinas._listar(solo_activas=True)
+        }
+    )
+    _cat_loader.instalar_como_defaults()
+    print(
+        f"[kiosko] init OK, {len(_cat_loader.cargar_todos())} servicios",
+        file=sys.stderr,
+        flush=True,
+    )
+
     ui.add_head_html(
         '<link rel="preconnect" href="https://fonts.googleapis.com">'
         '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">'
@@ -79,75 +111,34 @@ def kiosko_cliente():
     wizard = _cargar_wizard()
 
     @ui.refreshable
-    def kiosko_ui() -> None:
-        # Header
-        with ui.element("div").props("id=kiosko-root"):
-            with ui.element("div").props("id=main-col"):
-                with ui.element("div").props("id=header"):
-                    with ui.element("div").classes("logo-area"):
-                        ui.image(LOGOTIPO).style(
-                            "width:50px;height:50px;object-fit:contain;"
-                        )
-                        ui.html('<span class="titulo">Lavanderia EcoLuna</span>')
-                    ui.html(
-                        '<div class="reloj" id="reloj-txt">--/--/----<br>--:--:--</div>'
-                    )
-
-                with ui.element("div").props("id=content"):
-                    _render_paso(wizard, kiosko_ui.refresh)
+    def kiosko_content() -> None:
+        """Solo el área de contenido. El header y el sidebar son estáticos
+        para que el primer parche del WebSocket no falle por ser muy
+        grande."""
+        with ui.element("div").props("id=content"):
+            _render_paso(wizard, refrescar)
 
     def refrescar(nuevo_wizard: WizardKiosko = None) -> None:
         nonlocal wizard
         if nuevo_wizard is not None and nuevo_wizard is not wizard:
             wizard = nuevo_wizard
             _guardar_wizard(wizard)
-        kiosko_ui.refresh()
+        kiosko_content.refresh()
 
-    # Suscripción al bus: cuando llega `pago.confirmado` o `peso.aprobado`,
-    # la página reacciona automáticamente. El handler se suscribe a nivel
-    # de cliente (no del proceso) para que cada kiosko independiente tenga
-    # su propia cola.
-    cola_pago_confirmado = bus.subscribe(TIPO_PAGO_CONFIRMADO)
-    cola_pago_cancelado = bus.subscribe(TIPO_PAGO_CANCELADO)
-    cola_peso_aprobado = bus.subscribe(TIPO_PESO_APROBADO)
-    cola_peso_rechazado = bus.subscribe(TIPO_PESO_RECHAZADO)
-    cola_orden_cancelada = bus.subscribe(TIPO_ORDEN_CANCELADA)
-
-    async def consumir_eventos() -> None:
-        # `lanzado` evita que se acumulen tareas al re-renderizar.
-        while True:
-            ev = await cola_pago_confirmado.get()
-            if (
-                wizard.ultimo_id_transaccion is not None
-                and ev.get("orden_id") == wizard.ultimo_id_transaccion
-            ):
-                refrescar(wizard.ir_a_exito(ev.get("orden_id")))
-
-    async def consumir_peso() -> None:
-        while True:
-            ev = await cola_peso_aprobado.get()
-            if (
-                wizard.ultimo_id_transaccion is not None
-                and ev.get("orden_id") == wizard.ultimo_id_transaccion
-            ):
-                # El admin aprobó el peso: pasamos al paso de pago.
-                refrescar(replace(wizard, esperando_admin=None).iniciar_pago())
-
-    async def consumir_rechazo_peso() -> None:
-        while True:
-            ev = await cola_peso_rechazado.get()
-            if (
-                wizard.ultimo_id_transaccion is not None
-                and ev.get("orden_id") == wizard.ultimo_id_transaccion
-            ):
-                refrescar(wizard.notificar_rechazo_peso())
-
-    asyncio.create_task(consumir_eventos())
-    asyncio.create_task(consumir_peso())
-    asyncio.create_task(consumir_rechazo_peso())
-
-    # Render inicial
-    kiosko_ui()
+    # Header y sidebar estáticos (se renderizan una sola vez).
+    with ui.element("div").props("id=kiosko-root"):
+        with ui.element("div").props("id=main-col"):
+            with ui.element("div").props("id=header"):
+                with ui.element("div").classes("logo-area"):
+                    ui.image(LOGOTIPO).style(
+                        "width:50px;height:50px;object-fit:contain;"
+                    )
+                    ui.html('<span class="titulo">Lavanderia EcoLuna</span>')
+                ui.html(
+                    '<div class="reloj" id="reloj-txt">--/--/----<br>--:--:--</div>'
+                )
+            # Contenido refrescable (solo este subtree se re-renderiza).
+            kiosko_content()
 
     # En modo test, capturamos teclas para simular monedas.
     if "test" in __import__("sys").argv:
