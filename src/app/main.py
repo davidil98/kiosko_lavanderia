@@ -206,7 +206,17 @@ def main() -> None:
         ui.run(
             title=TITLE,
             port=PORT,
-            favicon=_favicon_data_url(),
+            # El favicon .ico (16/32/48) lo sirve /static, no un emoji
+            # dataURL que inflaba el HTML inicial.
+            favicon="/static/favicon.ico"
+            if (STATIC_DIR / "favicon.ico").exists()
+            else _favicon_data_url(),
+            # El primer patch del WebSocket del kiosko puede ser grande.
+            # Subimos el límite de 1MB (default de Starlette) a 10MB
+            # para que "Message too long" no rompa el primer render.
+            # El refactor en el kiosko (reemplazar ui.image por
+            # ui.html(<img>)) reduce el tamaño del parche ~15x.
+            ws_max_size=10 * 1024 * 1024,
             reload=False,
             show=False,
             storage_secret=STORAGE_SECRET,

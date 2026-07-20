@@ -118,7 +118,11 @@ def _render_sub_menu_lavar(wizard: WizardKiosko, refresh) -> None:
                     lambda c=svc.codigo: refresh(wizard.seleccionar_servicio(c)),
                 )
             ):
-                ui.image(svc.icono).style("width:64px;height:64px;object-fit:contain;")
+                ui.html(
+                    f'<img src="{svc.icono}" '
+                    f'style="width:64px;height:64px;object-fit:contain;" '
+                    f'alt="{svc.nombre}">'
+                )
                 label = svc.nombre
                 ui.html(
                     f'<span style="font-size:0.95rem;font-weight:800;color:#e2e8f0;">{label}</span>'

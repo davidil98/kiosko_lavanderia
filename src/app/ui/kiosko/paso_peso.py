@@ -205,8 +205,10 @@ def _render_ingreso_peso(wizard: WizardKiosko, refresh) -> None:
         with ui.element("div").style(
             "display:flex;align-items:center;gap:10px;margin-bottom:6px;"
         ):
-            ui.image("/media/icons/scale.svg").style(
-                "width:32px;height:32px;object-fit:contain;"
+            ui.html(
+                '<img src="/media/icons/scale.svg" '
+                'style="width:32px;height:32px;object-fit:contain;" '
+                'alt="Escala">'
             )
             ui.label("Ingresa el peso de tu ropa").style(
                 "font-size:1.5rem;font-weight:800;color:#e2e8f0;margin:0;"

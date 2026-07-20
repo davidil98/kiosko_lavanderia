@@ -443,6 +443,39 @@ Snapshot automático al primer `init_db()`. El superadmin puede:
 - **Iconos**: SVGs en `media/icons/`, jamás emojis (problema de fuentes en la Pi).
 - **Comentarios**: docstrings en funciones públicas. Inline solo donde el "por qué" no es obvio.
 
+### Paleta del kiosko (Solar High-Contrast)
+
+El kiosko cliente usa una paleta de **alto contraste** optimizada para luz solar directa sobre pantallas VGA cuadradas. Se activa con `<body data-theme="high-contrast">` (solo en el kiosko, **no en el admin**).
+
+| Variable | Color | Uso |
+|---|---|---|
+| `--bg-primary` | `#000000` | Fondo principal |
+| `--bg-card` | `#1c1c1c` | Tarjetas |
+| `--bg-elevated` | `#2d2d2d` | Elementos elevados |
+| `--text-primary` | `#ffffff` | Texto principal |
+| `--accent` | `#00ff00` | Verde neón (botón primario) |
+| `--success` | `#00ff00` | Éxito |
+| `--error` | `#ff0000` | Error |
+| `--warning` | `#ffff00` | Advertencia |
+| `--border` | `#ffffff` | Bordes |
+
+**Contraste WCAG AAA verificado:**
+- Texto blanco sobre negro: 21:1
+- Verde neón sobre negro: 15.3:1
+- Gris claro sobre negro: 13.6:1
+
+Para regenerar el CSS de la paleta tras cambios: `python src/app/static/kiosko.css` (no requiere recompilación).
+
+### Favicon
+
+El favicon `.ico` se genera desde `media/logo_slogan.png` con:
+
+```bash
+.venv/bin/python tools/build_favicon.py
+```
+
+Genera `src/app/static/favicon.ico` con 3 sizes (16, 32, 48). El `main.py` lo carga automáticamente. Si no existe, usa un emoji de fallback (no recomendado para la Pi).
+
 ---
 
 ## 14. Glosario

@@ -49,8 +49,10 @@ def _render_metodos_pago(wizard: WizardKiosko, refresh) -> None:
                     ),
                 )
             ):
-                ui.image(metodo.icono).style(
-                    "width:80px;height:80px;object-fit:contain;"
+                ui.html(
+                    f'<img src="{metodo.icono}" '
+                    f'style="width:80px;height:80px;object-fit:contain;" '
+                    f'alt="{metodo.nombre}">'
                 )
                 ui.html(
                     f'<span style="font-size:1.2rem;font-weight:800;color:#e2e8f0;">{metodo.nombre}</span>'

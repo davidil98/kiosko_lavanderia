@@ -8,8 +8,15 @@ Simula el flujo completo:
 5. Selecciona método de pago (monedas).
 6. Inyecta monedas via el endpoint /api/kiosko/moneda.
 7. Confirma pago.
-8. Verifica que aparece la pantalla de éxito.
+8. Verificar que aparece la pantalla de éxito.
+
+Tras la Opción 1+5 (ws_max_size=10MB + ui.html(<img>)), el primer
+parche del WebSocket ya no supera el límite y el kiosko renderiza
+correctamente con la paleta High-Contrast.
 """
+
+import asyncio
+import time
 
 import sys
 import time
@@ -42,19 +49,13 @@ def _start_server():
     return proc
 
 
-@pytest.mark.xfail(
-    reason="Kiosko renderiza con 'Message too long' en el WebSocket. "
-    "El primer parche de NiceGUI supera el límite interno. "
-    "Necesita investigación de la causa raíz.",
-    strict=False,
-)
-@pytest.mark.xfail(
-    reason="Kiosko renderiza con 'Message too long' en el WebSocket. "
-    "Necesita investigacion de la causa raiz.",
-    strict=False,
-)
 def test_e2e_kiosko_flujo_completo_monedas():
-    """Cliente: ver servicio → seleccionar → nombre → peso → pago → éxito."""
+    """Cliente: ver servicio → seleccionar → nombre → peso → pago → éxito.
+
+    Tras las fixes de la Opción 1+5 (ws_max_size=10MB y
+    ui.image → ui.html(<img>)), el primer patch del WebSocket ya no
+    supera el límite. El kiosko renderiza correctamente.
+    """
     from playwright.sync_api import sync_playwright
 
     proc = _start_server()

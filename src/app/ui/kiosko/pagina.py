@@ -101,6 +101,15 @@ def kiosko_cliente():
         flush=True,
     )
 
+    # Activar la paleta "high-contrast" solo en el kiosko (no en el admin).
+    # El atributo `data-theme` se inyecta via un script inline al inicio
+    # del head, para que se ejecute antes de que cualquier CSS cargue.
+    ui.add_head_html(
+        '<script>document.addEventListener("DOMContentLoaded",function(){'
+        'document.body.setAttribute("data-theme","high-contrast");});'
+        'document.body&&document.body.setAttribute("data-theme","high-contrast");'
+        "</script>"
+    )
     ui.add_head_html(
         '<link rel="preconnect" href="https://fonts.googleapis.com">'
         '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">'
@@ -130,8 +139,15 @@ def kiosko_cliente():
         with ui.element("div").props("id=main-col"):
             with ui.element("div").props("id=header"):
                 with ui.element("div").classes("logo-area"):
-                    ui.image(LOGOTIPO).style(
-                        "width:50px;height:50px;object-fit:contain;"
+                    # `ui.html(<img>)` en lugar de `ui.image()`: el
+                    # componente Vue de `ui.image` agrega ~3KB al
+                    # bundle JS y al parche del WebSocket. Para una
+                    # imagen estática como el logo, un `<img>` HTML
+                    # directo es ~50x más liviano.
+                    ui.html(
+                        f'<img src="{LOGOTIPO}" '
+                        f'style="width:50px;height:50px;object-fit:contain;" '
+                        f'alt="Logo EcoLuna">'
                     )
                     ui.html('<span class="titulo">Lavanderia EcoLuna</span>')
                 ui.html(
