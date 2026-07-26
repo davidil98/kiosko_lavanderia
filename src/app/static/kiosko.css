@@ -1,7 +1,7 @@
 /* EcoLuna Kiosko - Solar High-Contrast Palette
  *
  * Optimizado para pantallas VGA cuadradas (640x480, 800x480) con luz
- * solar directa. Solo se activa con data-theme="high-contrast" en <body>;
+ * solar directa. Solo se activa con data-theme="high-contrast" en #kiosko-root;
  * el admin mantiene su paleta original.
  *
  * Contraste WCAG AAA verificado:
@@ -10,7 +10,7 @@
  *   - gris claro (#ccc) sobre negro (#000): 13.6:1
  */
 
-body[data-theme="high-contrast"] {
+#kiosko-root[data-theme="high-contrast"] {
     --bg-primary:    #000000;
     --bg-card:       #1c1c1c;
     --bg-elevated:   #2d2d2d;
@@ -27,53 +27,85 @@ body[data-theme="high-contrast"] {
     background: var(--bg-primary);
     color: var(--text-primary);
     font-family: 'Inter', system-ui, sans-serif;
-    font-size: 16px;
+    font-size: 15px;
     margin: 0;
     padding: 0;
     height: 100vh;
     overflow: hidden;
 }
 
-/* ── Layout: header + sidebar + content ──────────────────────────────── */
+/* ── Layout: header + (sidebar | content) ──────────────────────────── */
 
-body[data-theme="high-contrast"] #kiosko-root {
-    display: grid;
-    grid-template-columns: 220px 1fr;
-    grid-template-rows: 80px 1fr;
-    grid-template-areas:
-        "header header"
-        "sidebar content";
+#kiosko-root[data-theme="high-contrast"] {
+    display: flex;
+    flex-direction: column;
     height: 100vh;
+    width: 100vw;
     max-width: 1024px;
     margin: 0 auto;
 }
 
-body[data-theme="high-contrast"] #header {
-    grid-area: header;
+#kiosko-root[data-theme="high-contrast"] #header {
+    flex-shrink: 0;
+    height: 60px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0 20px;
+    padding: 0 16px;
     background: var(--bg-card);
     border-bottom: 2px solid var(--border);
 }
 
-body[data-theme="high-contrast"] .logo-area {
+/* Fila horizontal: sidebar | content */
+#kiosko-root[data-theme="high-contrast"] .main-row {
     display: flex;
-    align-items: center;
-    gap: 14px;
+    flex-direction: row;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
 }
 
-body[data-theme="high-contrast"] .logo-area .titulo {
-    font-size: 1.4rem;
+#kiosko-root[data-theme="high-contrast"] #sidebar {
+    width: 180px;
+    flex-shrink: 0;
+    background: var(--bg-card);
+    border-right: 2px solid var(--border);
+    padding: 12px 10px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+#kiosko-root[data-theme="high-contrast"] #content {
+    flex: 1;
+    min-width: 0;
+    padding: 16px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+
+
+#kiosko-root[data-theme="high-contrast"] .logo-area {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+#kiosko-root[data-theme="high-contrast"] .logo-area .titulo {
+    font-size: 1.2rem;
     font-weight: 800;
     color: var(--text-primary);
     letter-spacing: 0.5px;
 }
 
-body[data-theme="high-contrast"] .reloj {
+#kiosko-root[data-theme="high-contrast"] .reloj {
     font-family: 'Courier New', monospace;
-    font-size: 1rem;
+    font-size: 0.85rem;
     font-weight: 700;
     color: var(--accent);
     text-align: right;
@@ -81,401 +113,413 @@ body[data-theme="high-contrast"] .reloj {
     text-shadow: 0 0 4px rgba(0, 255, 0, 0.4);
 }
 
-/* ── Sidebar: línea vertical de progreso ──────────────────────────── */
+/* ── Sidebar: linea vertical de progreso ──────────────────────────── */
 
-body[data-theme="high-contrast"] #sidebar {
-    grid-area: sidebar;
-    background: var(--bg-card);
-    border-right: 2px solid var(--border);
-    padding: 16px 12px;
-    overflow-y: auto;
-}
-
-body[data-theme="high-contrast"] .sidebar-title {
-    font-size: 0.85rem;
+#kiosko-root[data-theme="high-contrast"] .sidebar-title {
+    font-size: 0.75rem;
     font-weight: 800;
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 1.5px;
-    margin-bottom: 16px;
+    margin-bottom: 10px;
     text-align: center;
 }
 
-body[data-theme="high-contrast"] .paso-item {
+#kiosko-root[data-theme="high-contrast"] .paso-item {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 14px 12px;
-    margin-bottom: 6px;
+    gap: 10px;
+    padding: 10px 10px;
+    margin-bottom: 4px;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-left: 4px solid var(--text-muted);
     border-radius: 4px;
     color: var(--text-secondary);
-    font-size: 0.9rem;
+    font-size: 0.8rem;
     font-weight: 600;
 }
 
-body[data-theme="high-contrast"] .paso-item .num {
+#kiosko-root[data-theme="high-contrast"] .paso-item .num {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: 24px;
+    height: 24px;
     border-radius: 50%;
     background: var(--bg-primary);
     border: 2px solid var(--text-muted);
     color: var(--text-secondary);
     font-weight: 800;
-    font-size: 0.85rem;
+    font-size: 0.75rem;
     flex-shrink: 0;
 }
 
-body[data-theme="high-contrast"] .paso-item.completado {
+#kiosko-root[data-theme="high-contrast"] .paso-item.completado {
     border-left-color: var(--success);
     color: var(--text-primary);
 }
 
-body[data-theme="high-contrast"] .paso-item.completado .num {
+#kiosko-root[data-theme="high-contrast"] .paso-item.completado .num {
     background: var(--success);
     color: var(--bg-primary);
     border-color: var(--success);
 }
 
-body[data-theme="high-contrast"] .paso-item.activo {
+#kiosko-root[data-theme="high-contrast"] .paso-item.activo {
     border-left-color: var(--accent);
     background: var(--bg-elevated);
     color: var(--text-primary);
     box-shadow: 0 0 12px rgba(0, 255, 0, 0.2);
 }
 
-body[data-theme="high-contrast"] .paso-item.activo .num {
+#kiosko-root[data-theme="high-contrast"] .paso-item.activo .num {
     background: var(--accent);
     color: var(--bg-primary);
     border-color: var(--accent);
 }
 
-/* ── Content: tarjetas de servicio ────────────────────────────────── */
+/* ── Content: area central ────────────────────────────────────────── */
 
-body[data-theme="high-contrast"] #content {
-    grid-area: content;
-    padding: 24px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-}
-
-body[data-theme="high-contrast"] .instruccion {
-    font-size: 1.3rem;
+#kiosko-root[data-theme="high-contrast"] .instruccion {
+    font-size: 1.15rem;
     font-weight: 700;
     color: var(--text-primary);
-    margin-bottom: 24px;
+    margin-bottom: 16px;
     text-align: center;
 }
 
-body[data-theme="high-contrast"] .card-servicio {
+/* ── Tarjetas de servicio (touch, centradas) ──────────────────────── */
+
+#kiosko-root[data-theme="high-contrast"] .card-servicio {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 12px;
-    padding: 24px;
-    margin-bottom: 16px;
+    gap: 8px;
+    padding: 18px;
+    margin-bottom: 12px;
     background: var(--bg-card);
     border: 2px solid var(--border);
-    border-radius: 8px;
+    border-radius: 12px;
     color: var(--text-primary);
     cursor: pointer;
-    min-height: 80px;
-    min-width: 80px;
+    min-height: 70px;
+    min-width: 70px;
     transition: background 0.1s, transform 0.1s;
 }
 
-body[data-theme="high-contrast"] .card-servicio:hover {
+#kiosko-root[data-theme="high-contrast"] .card-servicio:hover {
     background: var(--bg-elevated);
-    transform: scale(1.02);
+    transform: scale(1.03);
 }
 
-body[data-theme="high-contrast"] .card-servicio img {
-    width: 64px;
-    height: 64px;
+#kiosko-root[data-theme="high-contrast"] .card-servicio:active {
+    background: var(--accent);
+    color: var(--bg-primary);
+}
+
+#kiosko-root[data-theme="high-contrast"] .card-servicio img {
+    width: 56px;
+    height: 56px;
     object-fit: contain;
 }
 
-body[data-theme="high-contrast"] .card-servicio .span {
-    font-size: 1.1rem;
+#kiosko-root[data-theme="high-contrast"] .card-servicio .span {
+    font-size: 1rem;
     font-weight: 700;
     color: var(--text-primary);
 }
 
-body[data-theme="high-contrast"] .card-personalizado {
+#kiosko-root[data-theme="high-contrast"] .card-personalizado {
     background: var(--bg-elevated);
     border-color: var(--accent);
 }
 
-body[data-theme="high-contrast"] .card-personalizado:hover {
+#kiosko-root[data-theme="high-contrast"] .card-personalizado:hover {
     background: var(--bg-card);
 }
 
 /* ── Inputs y botones ──────────────────────────────────────────────── */
 
-body[data-theme="high-contrast"] input,
-body[data-theme="high-contrast"] .numpad-btn {
+#kiosko-root[data-theme="high-contrast"] input,
+#kiosko-root[data-theme="high-contrast"] .numpad-btn {
     background: var(--bg-elevated);
     color: var(--text-primary);
     border: 2px solid var(--border);
     border-radius: 4px;
-    padding: 12px 16px;
-    font-size: 1.1rem;
+    padding: 10px 14px;
+    font-size: 1rem;
     font-weight: 600;
-    min-height: 60px;
+    min-height: 50px;
     outline: none;
 }
 
-body[data-theme="high-contrast"] input:focus {
+#kiosko-root[data-theme="high-contrast"] input:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--accent);
 }
 
-body[data-theme="high-contrast"] .numpad {
+#kiosko-root[data-theme="high-contrast"] .numpad {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 8px;
-    max-width: 280px;
+    gap: 6px;
+    max-width: 240px;
 }
 
-body[data-theme="high-contrast"] .numpad-btn {
+#kiosko-root[data-theme="high-contrast"] .numpad-btn {
     cursor: pointer;
-    min-width: 60px;
-    min-height: 60px;
-    font-size: 1.3rem;
+    min-width: 50px;
+    min-height: 50px;
+    font-size: 1.15rem;
     font-weight: 800;
 }
 
-body[data-theme="high-contrast"] .numpad-btn:hover {
+#kiosko-root[data-theme="high-contrast"] .numpad-btn:hover {
     background: var(--bg-card);
     color: var(--accent);
 }
 
-body[data-theme="high-contrast"] .numpad-btn:active {
+#kiosko-root[data-theme="high-contrast"] .numpad-btn:active {
     background: var(--accent);
     color: var(--bg-primary);
 }
 
-body[data-theme="high-contrast"] .numpad-display {
+#kiosko-root[data-theme="high-contrast"] .numpad-display {
     font-family: 'Courier New', monospace;
-    font-size: 2.4rem;
+    font-size: 2rem;
     font-weight: 800;
     color: var(--accent);
     text-align: center;
-    margin-bottom: 16px;
-    padding: 16px;
+    margin-bottom: 12px;
+    padding: 12px;
     background: var(--bg-primary);
     border: 2px solid var(--border);
     border-radius: 4px;
 }
 
-body[data-theme="high-contrast"] .btn-confirmar-nombre {
+#kiosko-root[data-theme="high-contrast"] .btn-confirmar-nombre {
     background: var(--accent);
     color: var(--bg-primary);
     border: 2px solid var(--accent);
     border-radius: 4px;
-    padding: 16px 32px;
-    font-size: 1.1rem;
+    padding: 14px 28px;
+    font-size: 1rem;
     font-weight: 800;
     cursor: pointer;
-    min-height: 60px;
+    min-height: 50px;
 }
 
-body[data-theme="high-contrast"] .btn-confirmar-nombre:hover {
+#kiosko-root[data-theme="high-contrast"] .btn-confirmar-nombre:hover {
     background: var(--accent-hover);
     border-color: var(--accent-hover);
 }
 
-body[data-theme="high-contrast"] .btn-confirmar-nombre:disabled {
+#kiosko-root[data-theme="high-contrast"] .btn-confirmar-nombre:disabled {
     background: var(--bg-elevated);
     color: var(--text-muted);
     border-color: var(--text-muted);
     cursor: not-allowed;
 }
 
-body[data-theme="high-contrast"] .btn-cancelar {
+#kiosko-root[data-theme="high-contrast"] .btn-cancelar {
     background: var(--error);
     color: var(--text-primary);
     border: 2px solid var(--error);
     border-radius: 4px;
-    padding: 12px 24px;
+    padding: 10px 20px;
     font-weight: 700;
     cursor: pointer;
-    min-height: 50px;
+    min-height: 44px;
 }
 
-body[data-theme="high-contrast"] .btn-cancelar:hover {
+#kiosko-root[data-theme="high-contrast"] .btn-cancelar:hover {
     background: #cc0000;
+}
+
+/* ── Paso nombre ───────────────────────────────────────────────────── */
+
+#kiosko-root[data-theme="high-contrast"] #nombre-panel {
+    text-align: center;
+    width: 100%;
+    max-width: 420px;
 }
 
 /* ── Paso de pago: progreso de monedas ─────────────────────────────── */
 
-body[data-theme="high-contrast"] .monto-box {
+#kiosko-root[data-theme="high-contrast"] .monto-box {
     background: var(--bg-card);
     border: 2px solid var(--border);
     border-radius: 8px;
-    padding: 16px;
+    padding: 12px;
     text-align: center;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
 }
 
-body[data-theme="high-contrast"] .monto-label {
-    font-size: 0.85rem;
+#kiosko-root[data-theme="high-contrast"] .monto-label {
+    font-size: 0.78rem;
     color: var(--text-secondary);
     text-transform: uppercase;
     letter-spacing: 1px;
     margin-bottom: 4px;
 }
 
-body[data-theme="high-contrast"] .monto-valor {
+#kiosko-root[data-theme="high-contrast"] .monto-valor {
     font-family: 'Courier New', monospace;
-    font-size: 2.2rem;
+    font-size: 2rem;
     font-weight: 800;
     color: var(--accent);
     text-shadow: 0 0 4px rgba(0, 255, 0, 0.3);
     margin-bottom: 4px;
 }
 
-body[data-theme="high-contrast"] .monto-sub {
-    font-size: 0.85rem;
+#kiosko-root[data-theme="high-contrast"] .monto-sub {
+    font-size: 0.78rem;
     color: var(--text-secondary);
 }
 
-body[data-theme="high-contrast"] .progress-bar-bg {
-    height: 16px;
+#kiosko-root[data-theme="high-contrast"] .progress-bar-bg {
+    height: 12px;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: 8px;
     overflow: hidden;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
 }
 
-body[data-theme="high-contrast"] .progress-bar-fill {
+#kiosko-root[data-theme="high-contrast"] .progress-bar-fill {
     height: 100%;
     background: var(--accent);
     transition: width 0.3s;
 }
 
-body[data-theme="high-contrast"] .progress-pct {
-    font-size: 0.85rem;
+#kiosko-root[data-theme="high-contrast"] .progress-pct {
+    font-size: 0.78rem;
     color: var(--text-secondary);
     text-align: center;
 }
 
-body[data-theme="high-contrast"] .cambio-box {
+#kiosko-root[data-theme="high-contrast"] .cambio-box {
     background: var(--bg-card);
     border: 2px solid var(--success);
     border-radius: 4px;
-    padding: 12px;
+    padding: 10px;
     text-align: center;
     color: var(--success);
     font-weight: 700;
-    font-size: 1.1rem;
-    margin: 16px 0;
+    font-size: 1rem;
+    margin: 12px 0;
 }
 
-/* ── Paso de éxito ─────────────────────────────────────────────────── */
+/* ── Paso de exito ─────────────────────────────────────────────────── */
 
-body[data-theme="high-contrast"] #exito-panel {
+#kiosko-root[data-theme="high-contrast"] #exito-panel {
     text-align: center;
-    padding: 32px 16px;
+    padding: 24px 12px;
 }
 
-body[data-theme="high-contrast"] .exito-titulo {
-    font-size: 2rem;
+#kiosko-root[data-theme="high-contrast"] .exito-titulo {
+    font-size: 1.7rem;
     font-weight: 800;
     color: var(--accent);
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     text-shadow: 0 0 8px rgba(0, 255, 0, 0.3);
 }
 
-body[data-theme="high-contrast"] .exito-subtitulo {
-    font-size: 1.1rem;
+#kiosko-root[data-theme="high-contrast"] .exito-subtitulo {
+    font-size: 1rem;
     color: var(--text-primary);
-    margin-bottom: 24px;
+    margin-bottom: 18px;
 }
 
-body[data-theme="high-contrast"] .exito-datos {
+#kiosko-root[data-theme="high-contrast"] .exito-datos {
     display: inline-block;
     text-align: left;
     background: var(--bg-card);
     border: 2px solid var(--border);
     border-radius: 4px;
-    padding: 16px 24px;
-    margin-bottom: 16px;
+    padding: 12px 20px;
+    margin-bottom: 12px;
 }
 
-body[data-theme="high-contrast"] .exito-dato-row {
+#kiosko-root[data-theme="high-contrast"] .exito-dato-row {
     display: flex;
     justify-content: space-between;
-    gap: 24px;
-    padding: 6px 0;
-    font-size: 0.95rem;
+    gap: 20px;
+    padding: 5px 0;
+    font-size: 0.85rem;
 }
 
-body[data-theme="high-contrast"] .exito-dato-label {
+#kiosko-root[data-theme="high-contrast"] .exito-dato-label {
     color: var(--text-secondary);
     text-transform: uppercase;
-    font-size: 0.8rem;
+    font-size: 0.75rem;
     letter-spacing: 0.5px;
 }
 
-body[data-theme="high-contrast"] .exito-dato-val {
+#kiosko-root[data-theme="high-contrast"] .exito-dato-val {
     color: var(--text-primary);
     font-weight: 700;
 }
 
-body[data-theme="high-contrast"] .exito-icono {
-    margin-bottom: 16px;
+#kiosko-root[data-theme="high-contrast"] .exito-icono {
+    margin-bottom: 12px;
 }
 
-body[data-theme="high-contrast"] .exito-icono img {
-    width: 64px;
-    height: 64px;
+#kiosko-root[data-theme="high-contrast"] .exito-icono img {
+    width: 56px;
+    height: 56px;
 }
 
-body[data-theme="high-contrast"] .reinicio-txt {
-    margin-top: 24px;
-    font-size: 0.9rem;
+#kiosko-root[data-theme="high-contrast"] .reinicio-txt {
+    margin-top: 18px;
+    font-size: 0.82rem;
     color: var(--text-muted);
     font-style: italic;
 }
 
-/* ── Responsive: pantalla VGA cuadrada (640x480) ──────────────────── */
+/* ── Responsive: pantalla angosta (< 600px) ────────────────────────── */
 
-@media (max-width: 700px) {
-    body[data-theme="high-contrast"] #kiosko-root {
+@media (max-width: 600px) {
+    #kiosko-root[data-theme="high-contrast"] {
         grid-template-columns: 1fr;
-        grid-template-rows: 70px 60px 1fr;
+        grid-template-rows: 56px 52px 1fr;
         grid-template-areas:
             "header"
             "sidebar"
             "content";
     }
-    body[data-theme="high-contrast"] #sidebar {
+    #kiosko-root[data-theme="high-contrast"] #sidebar {
         border-right: none;
         border-bottom: 2px solid var(--border);
-        padding: 6px 8px;
+        padding: 4px 8px;
         display: flex;
-        gap: 4px;
+        flex-direction: row;
+        gap: 3px;
         overflow-x: auto;
         overflow-y: hidden;
+        align-items: center;
     }
-    body[data-theme="high-contrast"] .sidebar-title {
+    #kiosko-root[data-theme="high-contrast"] .sidebar-title {
         display: none;
     }
-    body[data-theme="high-contrast"] .paso-item {
+    #kiosko-root[data-theme="high-contrast"] .paso-item {
         flex-shrink: 0;
-        padding: 8px 10px;
+        padding: 6px 8px;
         margin-bottom: 0;
+        font-size: 0.72rem;
     }
-    body[data-theme="high-contrast"] .card-servicio {
-        padding: 16px;
+    #kiosko-root[data-theme="high-contrast"] .paso-item .num {
+        width: 20px;
+        height: 20px;
+        font-size: 0.65rem;
+    }
+    #kiosko-root[data-theme="high-contrast"] .card-servicio {
+        padding: 14px;
+        min-height: 60px;
+        min-width: 60px;
+    }
+    #kiosko-root[data-theme="high-contrast"] .card-servicio img {
+        width: 48px;
+        height: 48px;
     }
 }

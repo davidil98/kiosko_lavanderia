@@ -70,9 +70,9 @@ class MetodoPoint(MetodoPagoStrategy):
                 on_click=lambda: _iniciar_cobro_point(ctx),
             ).classes("w-full text-lg font-bold py-3").style("margin-top:16px;")
 
-            ui.button("Cancelar y regresar", color="red").classes("btn-cancelar").on(
-                "click", lambda: ctx.on_cancelar()
-            )
+            ui.button("← Volver", on_click=lambda: ctx.on_volver()).classes(
+                "btn-confirmar-nombre max-w-xs mx-auto mt-4"
+            ).style("background:#334155;")
 
 
 async def _iniciar_cobro_point(ctx: ContextoPago) -> None:

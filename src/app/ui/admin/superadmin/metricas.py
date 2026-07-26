@@ -22,7 +22,7 @@ RANGOS = [
 ]
 
 
-def render() -> None:
+async def render() -> None:
     rango_ref: dict = {"value": "30d"}
 
     ui.html(
@@ -52,6 +52,8 @@ def render() -> None:
         k = await reportes.kpis(rango)
         await _render_kpis(k)
         await _render_charts(rango)
+
+    await contenido()
 
 
 async def _render_kpis(k: dict) -> None:
@@ -85,62 +87,84 @@ async def _render_charts(rango: str) -> None:
 
     # 1) Uso por máquina (columnas)
     if uso:
-        highchart.options_dict(
-            chart={"type": "column"},
-            title={"text": "Uso por máquina"},
-            xAxis={"categories": [u["maquina"] for u in uso], "title": {"text": ""}},
-            yAxis={"title": {"text": "Ciclos"}, "min": 0},
-            series=[{"name": "Ciclos", "data": [u["ciclos"] for u in uso]}],
+        highchart(
+            options={
+                "chart": {"type": "column"},
+                "title": {"text": "Uso por máquina"},
+                "xAxis": {
+                    "categories": [u["maquina"] for u in uso],
+                    "title": {"text": ""},
+                },
+                "yAxis": {"title": {"text": "Ciclos"}, "min": 0},
+                "series": [{"name": "Ciclos", "data": [u["ciclos"] for u in uso]}],
+            }
         ).classes("w-full mb-4").style("height:300px;")
 
     # 2) Horas pico (línea)
     if horas and any(horas):
-        highchart.options_dict(
-            chart={"type": "line"},
-            title={"text": "Horas pico (24h)"},
-            xAxis={"categories": [f"{h}h" for h in range(24)], "title": {"text": ""}},
-            yAxis={"title": {"text": "Órdenes"}, "min": 0},
-            series=[{"name": "Órdenes", "data": horas}],
+        highchart(
+            options={
+                "chart": {"type": "line"},
+                "title": {"text": "Horas pico (24h)"},
+                "xAxis": {
+                    "categories": [f"{h}h" for h in range(24)],
+                    "title": {"text": ""},
+                },
+                "yAxis": {"title": {"text": "Órdenes"}, "min": 0},
+                "series": [{"name": "Órdenes", "data": horas}],
+            }
         ).classes("w-full mb-4").style("height:300px;")
 
     # 3) Días pico (columnas)
     if dias and any(dias):
         nombres_dias = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-        highchart.options_dict(
-            chart={"type": "column"},
-            title={"text": "Días pico (semana)"},
-            xAxis={"categories": nombres_dias, "title": {"text": ""}},
-            yAxis={"title": {"text": "Órdenes"}, "min": 0},
-            series=[{"name": "Órdenes", "data": dias}],
+        highchart(
+            options={
+                "chart": {"type": "column"},
+                "title": {"text": "Días pico (semana)"},
+                "xAxis": {
+                    "categories": nombres_dias,
+                    "title": {"text": ""},
+                },
+                "yAxis": {"title": {"text": "Órdenes"}, "min": 0},
+                "series": [{"name": "Órdenes", "data": dias}],
+            }
         ).classes("w-full mb-4").style("height:300px;")
 
     # 4) Consumo promedio por servicio (barras horizontales)
     if promedio:
-        highchart.options_dict(
-            chart={"type": "bar"},
-            title={"text": "Consumo promedio por servicio (kg)"},
-            xAxis={
-                "categories": [p["servicio"] for p in promedio],
-                "title": {"text": ""},
-            },
-            yAxis={"title": {"text": "Kg promedio"}},
-            series=[
-                {
-                    "name": "Kg promedio",
-                    "data": [p["kg_promedio"] for p in promedio],
-                }
-            ],
+        highchart(
+            options={
+                "chart": {"type": "bar"},
+                "title": {"text": "Consumo promedio por servicio (kg)"},
+                "xAxis": {
+                    "categories": [p["servicio"] for p in promedio],
+                    "title": {"text": ""},
+                },
+                "yAxis": {"title": {"text": "Kg promedio"}},
+                "series": [
+                    {
+                        "name": "Kg promedio",
+                        "data": [p["kg_promedio"] for p in promedio],
+                    }
+                ],
+            }
         ).classes("w-full mb-4").style("height:300px;")
 
     # 5) Tasa efectivo vs tarjeta (columnas agrupadas)
     if tarjeta:
-        highchart.options_dict(
-            chart={"type": "column"},
-            title={"text": "Efectivo vs Tarjeta (mensual)"},
-            xAxis={"categories": [t["mes"] for t in tarjeta], "title": {"text": ""}},
-            yAxis={"title": {"text": "Monto ($)"}, "min": 0},
-            series=[
-                {"name": "Efectivo", "data": [t["efectivo"] for t in tarjeta]},
-                {"name": "Tarjeta", "data": [t["tarjeta"] for t in tarjeta]},
-            ],
+        highchart(
+            options={
+                "chart": {"type": "column"},
+                "title": {"text": "Efectivo vs Tarjeta (mensual)"},
+                "xAxis": {
+                    "categories": [t["mes"] for t in tarjeta],
+                    "title": {"text": ""},
+                },
+                "yAxis": {"title": {"text": "Monto ($)"}, "min": 0},
+                "series": [
+                    {"name": "Efectivo", "data": [t["efectivo"] for t in tarjeta]},
+                    {"name": "Tarjeta", "data": [t["tarjeta"] for t in tarjeta]},
+                ],
+            }
         ).classes("w-full mb-4").style("height:300px;")

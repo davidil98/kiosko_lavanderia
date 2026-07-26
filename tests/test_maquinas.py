@@ -15,6 +15,7 @@ def _db_tmp(tmp_path):
     from app.repo import db
     from app.core import maquinas as cm
     from app.core import loader as core_loader
+    from app.core import estado_maquinas as em
     from app.repo import maquinas as repo_maquinas
 
     db.usar_path_test(tmp_path / "hw.db")
@@ -36,7 +37,12 @@ def _db_tmp(tmp_path):
     )
     # Inyectar loaders de servicios y segmentaciones
     core_loader.instalar_como_defaults()
+    # Popular estado_maquinas con todas las máquinas (libres al inicio)
+    em.ESTADO.clear()
+    for m in repo_maquinas._listar(solo_activas=False):
+        em.registrar_maquina(m.codigo, m.nombre, m.tipo, m.modo)
     yield
+    em.ESTADO.clear()
     db.usar_path_test(None)
 
 

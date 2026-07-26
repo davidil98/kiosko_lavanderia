@@ -9,6 +9,7 @@ Tres sub-estados visuales (orden de precedencia):
 """
 
 import asyncio
+from datetime import datetime
 
 from dataclasses import replace
 from nicegui import ui
@@ -18,7 +19,9 @@ from app.core.precio import calcular_precio
 from app.core.servicios import cargar_segmentaciones
 from app.eventos.bus import bus
 from app.eventos.tipos import (
+    EventoDominio,
     TIPO_ORDEN_CANCELADA,
+    TIPO_ORDEN_CREADA,
     TIPO_PAGO_CANCELADO,
     TIPO_PESO_APROBADO,
     TIPO_PESO_RECHAZADO,
@@ -31,7 +34,7 @@ def render_paso_peso(wizard: WizardKiosko, refresh) -> None:
     if wizard.esperando_admin is not None:
         _render_esperando_admin(wizard, refresh)
         return
-    if wizard.sub is Sub.SEGMENTACIONES:
+    if wizard.sub == Sub.SEGMENTACIONES:
         _render_segmentaciones(wizard, refresh)
         return
     _render_ingreso_peso(wizard, refresh)
@@ -84,7 +87,7 @@ def _render_esperando_admin(wizard: WizardKiosko, refresh) -> None:
     """)
     ui.button(
         "← Regresar",
-        on_click=lambda: asyncio.create_task(_regresar(wizard, refresh)),
+        on_click=lambda: _regresar(wizard, refresh),
     ).classes("btn-confirmar-nombre max-w-xs mx-auto mt-6").style("background:#334155;")
 
 
@@ -95,10 +98,12 @@ async def _regresar(wizard: WizardKiosko, refresh) -> None:
     if motivo == "peso" and wizard.ultimo_id_transaccion is not None:
         await transacciones.rechazar_peso(wizard.ultimo_id_transaccion)
         bus.publish(
-            {
-                "tipo": TIPO_ORDEN_CANCELADA,
-                "orden_id": wizard.ultimo_id_transaccion,
-            }
+            EventoDominio(
+                tipo=TIPO_ORDEN_CANCELADA,
+                orden_id=wizard.ultimo_id_transaccion,
+                extra={},
+                cuando=datetime.now(),
+            )
         )
         refresh(wizard.volver_a_pesar())
         return
@@ -113,10 +118,12 @@ async def _regresar(wizard: WizardKiosko, refresh) -> None:
             await asyncio.to_thread(mp_point.cancelar_orden, mp_id)
     await transacciones.cancelar_pago_pendiente(wizard.ultimo_id_transaccion)
     bus.publish(
-        {
-            "tipo": TIPO_PAGO_CANCELADO,
-            "orden_id": wizard.ultimo_id_transaccion,
-        }
+        EventoDominio(
+            tipo=TIPO_PAGO_CANCELADO,
+            orden_id=wizard.ultimo_id_transaccion,
+            extra={},
+            cuando=datetime.now(),
+        )
     )
     refresh(wizard.volver_a_pesar())
 
@@ -292,6 +299,19 @@ def _render_ingreso_peso(wizard: WizardKiosko, refresh) -> None:
                 duracion_estimada_min=wizard.servicio.duracion_min,
                 modalidad=modalidad,
             )
+            bus.publish(
+                EventoDominio(
+                    tipo=TIPO_ORDEN_CREADA,
+                    orden_id=nuevo_id,
+                    extra={
+                        "servicio": wizard.servicio.nombre,
+                        "peso_kg": wizard.peso,
+                        "nombre": wizard.nombre or "Cliente",
+                        "modalidad": modalidad,
+                    },
+                    cuando=datetime.now(),
+                )
+            )
             nuevo = replace(
                 wizard,
                 ultimo_id_transaccion=nuevo_id,
@@ -301,7 +321,7 @@ def _render_ingreso_peso(wizard: WizardKiosko, refresh) -> None:
 
         ui.button(
             "Continuar",
-            on_click=lambda: asyncio.create_task(enviar_peso_a_revision()),
+            on_click=enviar_peso_a_revision,
         ).classes("btn-confirmar-nombre max-w-sm mx-auto mt-4")
 
 

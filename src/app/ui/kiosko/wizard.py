@@ -65,6 +65,40 @@ class WizardKiosko:
     esperando_admin: Optional[tuple[str, str]] = None  # (motivo, metodo_codigo)
     peso_rechazado_notificado: bool = False
 
+    @classmethod
+    def desde_dict(cls, d: dict) -> "WizardKiosko":
+        if not isinstance(d, dict):
+            return cls()
+        data = dict(d)
+        if "paso" in data and isinstance(data["paso"], str):
+            try:
+                data["paso"] = Paso(data["paso"])
+            except ValueError:
+                data["paso"] = Paso.SERVICIO
+        if "sub" in data and isinstance(data["sub"], str):
+            try:
+                data["sub"] = Sub(data["sub"])
+            except ValueError:
+                data["sub"] = Sub.NINGUNO
+        if "metodo" in data and isinstance(data["metodo"], str):
+            try:
+                data["metodo"] = MetodoPago(data["metodo"])
+            except ValueError:
+                data["metodo"] = None
+        if "servicio" in data and isinstance(data["servicio"], dict):
+            try:
+                data["servicio"] = ServicioInfo(**data["servicio"])
+            except Exception:
+                data["servicio"] = None
+        if "segmentacion" in data and isinstance(data["segmentacion"], dict):
+            try:
+                data["segmentacion"] = SegmentacionInfo(**data["segmentacion"])
+            except Exception:
+                data["segmentacion"] = None
+        if "esperando_admin" in data and isinstance(data["esperando_admin"], list):
+            data["esperando_admin"] = tuple(data["esperando_admin"])
+        return cls(**data)
+
     # ── Transiciones ─────────────────────────────────────────────────────────
 
     def with_nombre(self, nombre: str) -> "WizardKiosko":
@@ -142,6 +176,10 @@ class WizardKiosko:
 
     def terminar_espera(self) -> "WizardKiosko":
         return replace(self, esperando_admin=None)
+
+    def confirmar_peso_desde_admin(self) -> "WizardKiosko":
+        """Admin aprobó el peso: terminar espera y avanzar al paso de pago."""
+        return self.terminar_espera().iniciar_pago()
 
     def notificar_rechazo_peso(self) -> "WizardKiosko":
         return replace(self, peso_rechazado_notificado=True, peso=0.0)

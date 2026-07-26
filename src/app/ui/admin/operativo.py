@@ -8,8 +8,8 @@ Acciones: aprobar peso, rechazar peso, confirmar pago mostrador, cancelar pago.
 La tarjeta se actualiza automáticamente cada 3 segundos.
 """
 
-import asyncio
 import os
+import sys
 from typing import Optional
 
 from nicegui import app, ui
@@ -28,6 +28,7 @@ from app.repo import transacciones
 from app.ui.admin._componentes import (
     AccionTarjeta,
     boton_cerrar_sesion,
+    boton_volver_dashboard,
     render_header,
     render_seccion,
     tarjeta_orden,
@@ -157,25 +158,30 @@ async def admin_operativo():
         TIPO_PESO_RECHAZADO,
     )
 
-    cola_admin = bus.subscribe(TIPO_ORDEN_CREADA)
-    colas = [
-        bus.subscribe(t)
+    colas = {
+        bus.subscribe(t): t
         for t in (
+            TIPO_ORDEN_CREADA,
             TIPO_ORDEN_CANCELADA,
             TIPO_PESO_APROBADO,
             TIPO_PESO_RECHAZADO,
             TIPO_PAGO_CONFIRMADO,
+            TIPO_PAGO_CANCELADO,
         )
-    ]
-    colas.append(cola_admin)
+    }
 
     async def _consumir_eventos_admin():
-        while True:
-            await cola_admin.get()
-            contenido.refresh()
+        for cola, tipo in colas.items():
+            while True:
+                try:
+                    evt = cola.get_nowait()
+                except Exception:
+                    break
+                contenido.refresh()
 
-    asyncio.create_task(_consumir_eventos_admin())
+    ui.timer(0.3, _consumir_eventos_admin)
 
+    boton_volver_dashboard()
     boton_cerrar_sesion()
 
 
@@ -254,7 +260,7 @@ async def _cancelar_pago(o: dict) -> None:
 # ── Bypass ──────────────────────────────────────────────────────────────────
 
 
-def _abrir_bypass() -> None:
+async def _abrir_bypass() -> None:
     pwd_input_ref: dict = {"input": None}
 
     async def ejecutar() -> None:

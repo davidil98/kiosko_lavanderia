@@ -238,6 +238,73 @@ async def marcar_completado(id_transaccion: int, id_equipo: str) -> None:
     await db.run_in_executor(_marcar_completado, id_transaccion, id_equipo)
 
 
+# ── Asignación de máquina (personalizado) ────────────────────────────────────
+
+
+def _asignar_maquina_personalizado(
+    id_transaccion: int, codigo: str, duracion_min: int
+) -> None:
+    """Asigna máquina a una orden personalizada.
+
+    No requiere que la orden esté en `EN_CURSO`: el kanban personalizado
+    asigna máquina durante `ALISTANDO` (antes del ciclo).
+    """
+    conn = db.conectar()
+    conn.execute(
+        "UPDATE transacciones SET id_equipo = ?, duracion_estimada_min = ? "
+        "WHERE id_transaccion = ?",
+        (codigo, duracion_min, id_transaccion),
+    )
+    conn.commit()
+    conn.close()
+
+
+async def asignar_maquina_personalizado(
+    id_transaccion: int, codigo: str, duracion_min: int
+) -> None:
+    await db.run_in_executor(
+        _asignar_maquina_personalizado, id_transaccion, codigo, duracion_min
+    )
+
+
+def _cancelar_orden(id_transaccion: int, notas: str = "") -> None:
+    """Marca una orden como CANCELADO con nota opcional."""
+    conn = db.conectar()
+    ahora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    nota_final = f"{notas} · {ahora}" if notas else ahora
+    conn.execute(
+        "UPDATE transacciones SET estado = ?, notas = ? WHERE id_transaccion = ?",
+        ("Cancelado", nota_final, id_transaccion),
+    )
+    conn.commit()
+    conn.close()
+
+
+async def cancelar_orden(id_transaccion: int, notas: str = "") -> None:
+    await db.run_in_executor(_cancelar_orden, id_transaccion, notas)
+
+
+def _obtener_maquina_codigo_de_orden(id_transaccion: int) -> Optional[str]:
+    """Devuelve el nombre de la máquina asignada a una orden, o None.
+
+    Útil para liberar la máquina al cancelar/completar.
+    """
+    conn = db.conectar()
+    row = conn.execute(
+        "SELECT id_equipo FROM transacciones WHERE id_transaccion = ?",
+        (id_transaccion,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    nombre = row["id_equipo"] or ""
+    return nombre if nombre else None
+
+
+async def obtener_maquina_nombre_de_orden(id_transaccion: int) -> Optional[str]:
+    return await db.run_in_executor(_obtener_maquina_codigo_de_orden, id_transaccion)
+
+
 # ── Aprobación / rechazo de peso ─────────────────────────────────────────────
 
 

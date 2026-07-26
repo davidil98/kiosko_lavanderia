@@ -19,7 +19,11 @@ def test_todos_los_tipos_esta_completo():
     assert tipos.TIPO_ORDEN_CREADA in tipos.TODOS_LOS_TIPOS
     assert tipos.TIPO_PAGO_CONFIRMADO in tipos.TODOS_LOS_TIPOS
     assert tipos.TIPO_ORDEN_CANCELADA in tipos.TODOS_LOS_TIPOS
-    assert len(tipos.TODOS_LOS_TIPOS) == 9
+    assert tipos.TIPO_MAQUINA_LIBERADA in tipos.TODOS_LOS_TIPOS
+    assert tipos.TIPO_MAQUINA_PAUSADA in tipos.TODOS_LOS_TIPOS
+    assert tipos.TIPO_MAQUINA_REANUDADA in tipos.TODOS_LOS_TIPOS
+    assert tipos.TIPO_ETAPA_KANBAN_CAMBIADA in tipos.TODOS_LOS_TIPOS
+    assert len(tipos.TODOS_LOS_TIPOS) == 13
 
 
 def test_factory_orden_creada():

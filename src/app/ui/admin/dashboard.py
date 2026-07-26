@@ -89,6 +89,15 @@ async def admin_dashboard():
             )
             render_tarjeta_dashboard(
                 TarjetaDashboard(
+                    icono="/media/icons/gear.svg",
+                    titulo="Máquinas",
+                    subtitulo="Estado en tiempo real: libre, en uso, pausada",
+                    href="/admin/maquinas",
+                ),
+                super,
+            )
+            render_tarjeta_dashboard(
+                TarjetaDashboard(
                     icono="/media/icons/ticket.svg",
                     titulo="Cortes de Caja",
                     subtitulo="Apertura, movimientos y cierre de caja",

@@ -19,6 +19,7 @@ from nicegui import ui
 from app.core import cortes as core_cortes
 from app.ui.admin._componentes import (
     boton_cerrar_sesion,
+    boton_volver_dashboard,
     render_header,
 )
 from app.ui.compartido.auth import es_superadmin, redirigir_si_no_autenticado
@@ -76,6 +77,7 @@ async def admin_cortes():
             contenido.refresh()
 
     ui.timer(10.0, lambda: asyncio.create_task(_tick_cortes()))
+    boton_volver_dashboard()
     boton_cerrar_sesion()
 
 

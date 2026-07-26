@@ -2,8 +2,10 @@
 
 - `render_header()`: el header sticky con logo, título y chip de usuario.
 - `boton_cerrar_sesion()`: botón flotante bottom-right para logout.
+- `boton_volver_dashboard()`: botón flotante bottom-left para volver a /admin.
 - `render_tarjeta_dashboard()`: tarjeta con icono, título, subtítulo y badge opcional.
 - `tarjeta_orden()`: tarjeta de orden para los 3 paneles operativos.
+- `tarjeta_maquina()`: tarjeta de máquina para el panel /admin/maquinas.
 - `render_seccion()`: header de sección con icono, título y contador.
 """
 
@@ -19,6 +21,8 @@ from app.ui.compartido.estilos import (
     badge_modalidad,
     badge_servicio,
 )
+from app.repo._row_a import Maquina
+from app.core.estado_maquinas import EstadoMaquina
 
 
 @dataclass
@@ -80,6 +84,15 @@ def boton_cerrar_sesion() -> None:
 
     with ui.page_sticky(position="bottom-right", x_offset=20, y_offset=20):
         ui.button("Cerrar sesión", on_click=cerrar_sesion).props("flat color=negative")
+
+
+def boton_volver_dashboard() -> None:
+    """Botón flotante bottom-left que vuelve al panel de administración."""
+    with ui.page_sticky(position="bottom-left", x_offset=20, y_offset=20):
+        ui.button(
+            "← Panel de administración",
+            on_click=lambda: ui.navigate.to("/admin"),
+        ).props("flat color=primary")
 
 
 def render_tarjeta_dashboard(t: TarjetaDashboard, es_superadmin: bool) -> None:
@@ -147,16 +160,19 @@ def tarjeta_orden(v: dict, acciones: list[AccionTarjeta]) -> None:
                 f"Monto: <strong>${monto}</strong>"
                 f"</div>"
             )
+            nota_maquina = v.get("nota_maquina")
+            if nota_maquina:
+                ui.html(nota_maquina)
         with ui.element("div").style(
             "flex-shrink:0;display:flex;flex-direction:column;gap:8px;"
             "align-items:flex-end;"
         ):
             for acc in acciones:
 
-                def _on_click(_e=None, vv=v, aa=acc) -> None:
-                    import asyncio
-
-                    asyncio.create_task(aa.handler(vv))
+                async def _on_click(_e=None, vv=v, aa=acc) -> None:
+                    result = aa.handler(vv)
+                    if result is not None:
+                        await result
 
                 ui.button(acc.label, on_click=_on_click).props(
                     f"color={acc.color}"
@@ -231,3 +247,93 @@ def auto_refresh_smart(
         # else: print(f"[auto_refresh_smart] sin cambios, no refresca")
 
     ui.timer(intervalo_s, _tick)
+
+
+# ── Tarjeta de máquina (panel /admin/maquinas) ────────────────────────────
+
+
+def tarjeta_maquina(
+    m: Maquina,
+    em: Optional[EstadoMaquina],
+    on_pausar: Callable[[str], Awaitable[None]],
+    on_reanudar: Callable[[str], Awaitable[None]],
+    on_liberar: Callable[[str], Awaitable[None]],
+) -> None:
+    """Tarjeta de máquina con estado en tiempo real y acciones."""
+    if em is None or not em.ocupada:
+        estado_color = "#16a34a"  # verde
+        estado_label = "Libre"
+        badge_bg = "#dcfce7"
+        badge_fg = "#166534"
+    elif em.pausada:
+        estado_color = "#ca8a04"  # amarillo
+        estado_label = "Pausada"
+        badge_bg = "#fef9c3"
+        badge_fg = "#854d0e"
+    else:
+        estado_color = "#dc2626"  # rojo
+        estado_label = "En uso"
+        badge_bg = "#fee2e2"
+        badge_fg = "#991b1b"
+
+    with (
+        ui.element("div")
+        .classes("orden-card")
+        .style(f"border-left:6px solid {estado_color};")
+    ):
+        with ui.element("div").style("flex:1;min-width:0;"):
+            ui.html(
+                f'<div class="orden-numero">{m.nombre}</div>'
+                f'<span class="badge" style="background:{badge_bg};color:{badge_fg};'
+                f'font-size:0.95rem;padding:4px 12px;">{estado_label}</span>'
+            )
+            ui.html(
+                f'<div class="orden-meta">'
+                f"Código: <code>{m.codigo}</code> · "
+                f"Tipo: <strong>{m.tipo}</strong> · "
+                f"Modo: <strong>{m.modo}</strong> · "
+                f"Capacidad: {m.capacidad_kg} kg"
+                f"</div>"
+            )
+            if em and em.ocupada:
+                restante = em.tiempo_restante_min
+                restante_str = (
+                    f"{int(restante)} min" if em.modo == "sostenido" else "N/A (pulso)"
+                )
+                ui.html(
+                    f'<div class="orden-meta" style="margin-top:4px;">'
+                    f"Orden <strong>#{em.orden_id}</strong> · "
+                    f"Cliente <strong>{em.nombre_cliente or '—'}</strong> · "
+                    f"Servicio <strong>{em.servicio or '—'}</strong>"
+                    f"</div>"
+                )
+                if em.modo == "sostenido":
+                    ui.html(
+                        f'<div class="orden-meta" style="margin-top:2px;">'
+                        f"Tiempo restante: <strong>{restante_str}</strong>"
+                        f"</div>"
+                    )
+        with ui.element("div").style(
+            "flex-shrink:0;display:flex;flex-direction:column;gap:6px;"
+            "align-items:flex-end;"
+        ):
+            if em and em.ocupada and em.modo == "sostenido":
+                if em.pausada:
+                    ui.button(
+                        "▶ Reanudar",
+                        on_click=lambda _e=None, c=m.codigo: on_reanudar(c),
+                    ).props("color=warning").classes("orden-accion")
+                else:
+                    ui.button(
+                        "⏸ Pausar",
+                        on_click=lambda _e=None, c=m.codigo: on_pausar(c),
+                    ).props("color=warning").classes("orden-accion")
+            if em and em.ocupada:
+                ui.button(
+                    "⏹ Liberar",
+                    on_click=lambda _e=None, c=m.codigo: on_liberar(c),
+                ).props("color=negative").classes("orden-accion")
+            elif em is None or not em.ocupada:
+                ui.html(
+                    '<span style="font-size:0.78rem;color:#94a3b8;">Sin acciones</span>'
+                )

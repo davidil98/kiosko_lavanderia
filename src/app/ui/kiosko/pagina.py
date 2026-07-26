@@ -1,25 +1,25 @@
 """Página principal del kiosko cliente (`@ui.page("/")`).
 
 Estructura visual:
-- Header (logo + título + reloj)
-- Sidebar (5 pasos)
-- Content (paso actual)
+- Header (logo + título + reloj) — estático
+- Sidebar + Content — dentro de `kiosko_main` (@ui.refreshable async)
+  Ambos se re-renderizan juntos para que el sidebar refleje el paso actual.
 
-El wizard vive en `app.storage.user["kiosko_wizard"]` (dataclass serializado
-a dict). Cada página NiceGUI refresca su content pasando por `refrescar()`
-que re-renderiza según el `wizard.paso` y `wizard.sub`.
+El wizard vive en `app.storage.general["kiosko_wizard"]`. El consumer loop
+de eventos (`_consumir_eventos_kiosko`) escucha eventos del bus:
+- TIPO_PESO_APROBADO / TIPO_PESO_RECHAZADO (admin aprueba/rechaza peso)
+- TIPO_PAGO_CONFIRMADO / TIPO_PAGO_CANCELADO (admin confirma/cancela pago mostrador)
 """
 
-import asyncio
 import json
-from dataclasses import asdict, replace
+import sys
+
+from dataclasses import asdict
 
 from nicegui import app, ui
 
-from app.core.estados import MetodoPago
 from app.eventos.bus import bus
 from app.eventos.tipos import (
-    TIPO_ORDEN_CANCELADA,
     TIPO_PAGO_CANCELADO,
     TIPO_PAGO_CONFIRMADO,
     TIPO_PESO_APROBADO,
@@ -34,7 +34,7 @@ from app.ui.kiosko import (
     paso_servicio,
     sidebar,
 )
-from app.ui.kiosko.wizard import Paso, Sub, WizardKiosko
+from app.ui.kiosko.wizard import Paso, WizardKiosko
 
 
 _CLOCK_JS = """
@@ -60,7 +60,10 @@ def _cargar_wizard() -> WizardKiosko:
     raw = app.storage.general.get(_wizard_storage_key())
     if raw is None:
         return WizardKiosko()
-    return WizardKiosko(**raw)
+    try:
+        return WizardKiosko.desde_dict(raw)
+    except Exception:
+        return WizardKiosko()
 
 
 def _guardar_wizard(w: WizardKiosko) -> None:
@@ -68,12 +71,7 @@ def _guardar_wizard(w: WizardKiosko) -> None:
 
 
 @ui.page("/")
-def kiosko_cliente():
-    # Inicializar la DB y los loaders ANTES de renderizar. Si la DB ya
-    # existe (caso normal), `init_db()` es idempotente. Si el
-    # `@app.on_startup` aún no corrió, esto garantiza que el kiosko
-    # tenga servicios para mostrar desde el primer GET.
-    import sys
+async def kiosko_cliente():
     from app.repo import db as _db
     from app.core import maquinas as _cm
     from app.repo import maquinas as _repo_maquinas
@@ -101,15 +99,6 @@ def kiosko_cliente():
         flush=True,
     )
 
-    # Activar la paleta "high-contrast" solo en el kiosko (no en el admin).
-    # El atributo `data-theme` se inyecta via un script inline al inicio
-    # del head, para que se ejecute antes de que cualquier CSS cargue.
-    ui.add_head_html(
-        '<script>document.addEventListener("DOMContentLoaded",function(){'
-        'document.body.setAttribute("data-theme","high-contrast");});'
-        'document.body&&document.body.setAttribute("data-theme","high-contrast");'
-        "</script>"
-    )
     ui.add_head_html(
         '<link rel="preconnect" href="https://fonts.googleapis.com">'
         '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">'
@@ -119,45 +108,66 @@ def kiosko_cliente():
 
     wizard = _cargar_wizard()
 
-    @ui.refreshable
-    def kiosko_content() -> None:
-        """Solo el área de contenido. El header y el sidebar son estáticos
-        para que el primer parche del WebSocket no falle por ser muy
-        grande."""
-        with ui.element("div").props("id=content"):
-            _render_paso(wizard, refrescar)
-
-    def refrescar(nuevo_wizard: WizardKiosko = None) -> None:
+    def _on_refresh(nuevo_wizard: WizardKiosko | None = None) -> None:
         nonlocal wizard
         if nuevo_wizard is not None and nuevo_wizard is not wizard:
             wizard = nuevo_wizard
             _guardar_wizard(wizard)
-        kiosko_content.refresh()
+        kiosko_main.refresh()
 
-    # Header y sidebar estáticos (se renderizan una sola vez).
-    with ui.element("div").props("id=kiosko-root"):
-        with ui.element("div").props("id=main-col"):
-            with ui.element("div").props("id=header"):
-                with ui.element("div").classes("logo-area"):
-                    # `ui.html(<img>)` en lugar de `ui.image()`: el
-                    # componente Vue de `ui.image` agrega ~3KB al
-                    # bundle JS y al parche del WebSocket. Para una
-                    # imagen estática como el logo, un `<img>` HTML
-                    # directo es ~50x más liviano.
-                    ui.html(
-                        f'<img src="{LOGOTIPO}" '
-                        f'style="width:50px;height:50px;object-fit:contain;" '
-                        f'alt="Logo EcoLuna">'
-                    )
-                    ui.html('<span class="titulo">Lavanderia EcoLuna</span>')
+    @ui.refreshable
+    async def kiosko_main() -> None:
+        nonlocal wizard
+        wizard = _cargar_wizard()
+        sidebar.render_sidebar(wizard)
+        with ui.element("div").props("id=content"):
+            _render_paso(wizard, _on_refresh)
+
+    with ui.element("div").props("id=kiosko-root data-theme=high-contrast"):
+        with ui.element("div").props("id=header"):
+            with ui.element("div").classes("logo-area"):
                 ui.html(
-                    '<div class="reloj" id="reloj-txt">--/--/----<br>--:--:--</div>'
+                    f'<img src="{LOGOTIPO}" '
+                    f'style="width:50px;height:50px;object-fit:contain;" '
+                    f'alt="Logo EcoLuna">'
                 )
-            # Contenido refrescable (solo este subtree se re-renderiza).
-            kiosko_content()
+                ui.html('<span class="titulo">Lavanderia EcoLuna</span>')
+            ui.html('<div class="reloj" id="reloj-txt">--/--/----<br>--:--:--</div>')
+        with ui.element("div").classes("main-row"):
+            await kiosko_main()
 
-    # En modo test, capturamos teclas para simular monedas.
-    if "test" in __import__("sys").argv:
+    colas = {
+        bus.subscribe(TIPO_PESO_APROBADO): "aprobado",
+        bus.subscribe(TIPO_PESO_RECHAZADO): "rechazado",
+        bus.subscribe(TIPO_PAGO_CONFIRMADO): "pago_confirmado",
+        bus.subscribe(TIPO_PAGO_CANCELADO): "pago_cancelado",
+    }
+
+    async def _consumir_eventos_kiosko() -> None:
+        for cola, tipo in list(colas.items()):
+            while True:
+                try:
+                    evt = cola.get_nowait()
+                except Exception:
+                    break
+                w = _cargar_wizard()
+                if w.esperando_admin is not None:
+                    if tipo == "aprobado":
+                        nuevo = w.confirmar_peso_desde_admin()
+                    elif tipo == "rechazado":
+                        nuevo = w.notificar_rechazo_peso().volver_a_pesar()
+                    elif tipo == "pago_confirmado":
+                        nuevo = w.ir_a_exito(evt.orden_id)
+                    elif tipo == "pago_cancelado":
+                        nuevo = w.volver_a_pesar()
+                    else:
+                        continue
+                    _guardar_wizard(nuevo)
+                    kiosko_main.refresh()
+
+    ui.timer(0.3, _consumir_eventos_kiosko)
+
+    if "test" in sys.argv:
 
         def handle_keyboard(e):
             if not e.action.keydown:
@@ -174,9 +184,7 @@ def kiosko_cliente():
 
                 if val not in PULSOS_A_MONEDA.values():
                     return
-                # Llamada HTTP al endpoint interno (en proceso)
                 import urllib.request
-                import json
 
                 req = urllib.request.Request(
                     "http://localhost:8000/api/kiosko/moneda",
@@ -191,16 +199,13 @@ def kiosko_cliente():
 
 
 def _render_paso(wizard: WizardKiosko, refresh) -> None:
-    # Sidebar (siempre visible)
-    sidebar.render_sidebar(wizard)
-
-    if wizard.paso is Paso.SERVICIO:
+    if wizard.paso == Paso.SERVICIO:
         paso_servicio.render_paso_servicio(wizard, refresh)
-    elif wizard.paso is Paso.NOMBRE:
+    elif wizard.paso == Paso.NOMBRE:
         paso_nombre.render_paso_nombre(wizard, refresh)
-    elif wizard.paso is Paso.PESO:
+    elif wizard.paso == Paso.PESO:
         paso_peso.render_paso_peso(wizard, refresh)
-    elif wizard.paso is Paso.PAGO:
+    elif wizard.paso == Paso.PAGO:
         paso_pago.render_paso_pago(wizard, refresh)
-    elif wizard.paso is Paso.EXITO:
+    elif wizard.paso == Paso.EXITO:
         paso_exito.render_paso_exito(wizard, refresh)

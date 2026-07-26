@@ -33,9 +33,10 @@ def _paso_completado(wizard: WizardKiosko, paso: Paso) -> bool:
 
 
 def _paso_activo(wizard: WizardKiosko, paso: Paso) -> bool:
-    if wizard.paso is paso:
+    if wizard.paso == paso:
         return True
     # Sub-estados: el paso PESO se considera activo si estamos en SEGMENTACIONES
-    if paso is Paso.PESO and wizard.sub is Sub.SEGMENTACIONES:
+    if paso == Paso.PESO and wizard.sub == Sub.SEGMENTACIONES:
         return True
     return False
+

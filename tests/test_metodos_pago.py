@@ -74,7 +74,7 @@ def test_contexto_pago_contiene_wizard_y_callbacks():
     from app.ui.kiosko.wizard import WizardKiosko
 
     w = WizardKiosko()
-    ctx = ContextoPago(wizard=w, on_cancelar=lambda: None, refresh=lambda *a: None)
+    ctx = ContextoPago(wizard=w, on_cancelar=lambda: None, on_volver=lambda: None, refresh=lambda *a: None)
     assert ctx.wizard is w
     assert callable(ctx.on_cancelar)
     assert callable(ctx.refresh)
@@ -154,7 +154,7 @@ def test_monedas_confirma_pago_publica_en_bus_y_persiste():
         # Suscribir al bus antes de confirmar
         cola = bus.subscribe(TIPO_PAGO_CONFIRMADO)
 
-        ctx = ContextoPago(wizard=w, on_cancelar=lambda: None, refresh=lambda *a: None)
+        ctx = ContextoPago(wizard=w, on_cancelar=lambda: None, on_volver=lambda: None, refresh=lambda *a: None)
         await _confirmar(ctx)
 
         ev = await asyncio.wait_for(cola.get(), timeout=1.0)
@@ -184,7 +184,7 @@ def test_monedas_maneja_id_invalido_sin_crashear():
         w = replace(
             w, metodo=MetodoPago.MONEDAS, ultimo_id_transaccion=99999, dinero=45
         )
-        ctx = ContextoPago(wizard=w, on_cancelar=lambda: None, refresh=lambda *a: None)
+        ctx = ContextoPago(wizard=w, on_cancelar=lambda: None, on_volver=lambda: None, refresh=lambda *a: None)
         # No debe crashear aunque la fila no exista
         await _confirmar(ctx)
 
@@ -219,7 +219,7 @@ def test_point_delega_a_adaptador_y_marca_pendiente_pago():
             .capturar_peso(3.0)
         )
         w = replace(w, metodo=MetodoPago.POINT, ultimo_id_transaccion=oid)
-        ctx = ContextoPago(wizard=w, on_cancelar=lambda: None, refresh=lambda *a: None)
+        ctx = ContextoPago(wizard=w, on_cancelar=lambda: None, on_volver=lambda: None, refresh=lambda *a: None)
 
         with patch(
             "app.core.pagos.point.asyncio.to_thread",
@@ -259,7 +259,7 @@ def test_point_error_de_red_no_modifica_la_orden():
             .capturar_peso(3.0)
         )
         w = replace(w, metodo=MetodoPago.POINT, ultimo_id_transaccion=oid)
-        ctx = ContextoPago(wizard=w, on_cancelar=lambda: None, refresh=lambda *a: None)
+        ctx = ContextoPago(wizard=w, on_cancelar=lambda: None, on_volver=lambda: None, refresh=lambda *a: None)
 
         with patch(
             "app.core.pagos.point.asyncio.to_thread",
@@ -301,7 +301,7 @@ def test_mostrador_marca_pendiente_pago_y_espera_admin():
             .capturar_peso(2.0)
         )
         w = replace(w, metodo=MetodoPago.MOSTRADOR, ultimo_id_transaccion=oid)
-        ctx = ContextoPago(wizard=w, on_cancelar=lambda: None, refresh=lambda *a: None)
+        ctx = ContextoPago(wizard=w, on_cancelar=lambda: None, on_volver=lambda: None, refresh=lambda *a: None)
 
         await _solicitar_pago_mostrador(ctx)
 

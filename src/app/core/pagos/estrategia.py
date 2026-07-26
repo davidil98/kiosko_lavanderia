@@ -24,12 +24,14 @@ class ContextoPago:
     """Lo que un MetodoPago necesita para renderizar e iniciar.
 
     - `wizard`: estado del cliente (paso, servicio, peso, dinero, último id).
-    - `on_cancelar`: callable UI (async) para volver al paso anterior.
+    - `on_cancelar`: callable UI (async) para cancelar totalmente (reset).
+    - `on_volver`: callable UI (async) para volver al paso anterior desde el panel de pago.
     - `refresh`: callable UI (sync) para re-renderizar el kiosko tras un cambio.
     """
 
     wizard: "WizardKiosko"
     on_cancelar: Callable[[], Awaitable[None]]
+    on_volver: Callable[[], Awaitable[None]]
     refresh: Callable[[], None]
 
 

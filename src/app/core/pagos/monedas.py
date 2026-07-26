@@ -79,9 +79,9 @@ class MetodoMonedas(MetodoPagoStrategy):
                     "font-weight:700; cursor:not-allowed;"
                 )
 
-            ui.button("Cancelar y regresar", color="red").classes("btn-cancelar").on(
-                "click", lambda: ctx.on_cancelar()
-            )
+            ui.button("← Volver", on_click=lambda: ctx.on_volver()).classes(
+                "btn-confirmar-nombre max-w-xs mx-auto mt-4"
+            ).style("background:#334155;")
 
 
 async def _confirmar(ctx: ContextoPago) -> None:

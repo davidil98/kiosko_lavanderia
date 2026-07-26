@@ -38,14 +38,14 @@ def color_servicio(servicio_codigo: str) -> tuple[str, str, str]:
 
 def _metodo_de_modalidad(m: Modalidad) -> MetodoPago:
     """Extrae el `MetodoPago` de una `Modalidad` compuesta (sin f-strings)."""
-    if m is Modalidad.AUTOSERVICIO or m is Modalidad.PERSONALIZADO:
+    if m == Modalidad.AUTOSERVICIO or m == Modalidad.PERSONALIZADO:
         return MetodoPago.MONEDAS  # default razonable
-    if m is Modalidad.BYPASS:
+    if m == Modalidad.BYPASS:
         return MetodoPago.MONEDAS
     # Mapeo explícito; el enum no tiene `de(metodo)` inverso
     for metodo in MetodoPago:
         try:
-            if Modalidad.de(m.base, metodo) is m:
+            if Modalidad.de(m.base, metodo) == m:
                 return metodo
         except Exception:
             pass
@@ -59,10 +59,11 @@ def badge_modalidad(m: Modalidad | str) -> str:
             m = Modalidad(m)
         except ValueError:
             return f'<span class="orden-servicio-badge" style="background:#e2e8f0;color:#475569;">{m}</span>'
-    if m is Modalidad.BYPASS:
+    if m == Modalidad.BYPASS:
         return '<span class="orden-servicio-badge" style="background:#fef3c7;color:#92400e;">Cortesía</span>'
     bg, fg, label = COLORES_METODO[_metodo_de_modalidad(m)]
     return f'<span class="orden-servicio-badge" style="background:{bg};color:{fg};">{label}</span>'
+
 
 
 def badge_metodo_pago(metodo: str) -> str:

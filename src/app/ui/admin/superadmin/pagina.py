@@ -13,7 +13,11 @@ Solo accesible para Moi y David.
 
 from nicegui import ui
 
-from app.ui.admin._componentes import boton_cerrar_sesion, render_header
+from app.ui.admin._componentes import (
+    boton_cerrar_sesion,
+    boton_volver_dashboard,
+    render_header,
+)
 from app.ui.admin.superadmin import (
     calculadora,
     maquinas,
@@ -82,8 +86,8 @@ async def admin_superadmin():
             calculadora.render()
 
         @ui.refreshable
-        def tab_metricas_content() -> None:
-            metricas.render()
+        async def tab_metricas_content() -> None:
+            await metricas.render()
 
         @ui.refreshable
         def tab_respaldo_content() -> None:
@@ -99,8 +103,9 @@ async def admin_superadmin():
             with ui.tab_panel(tab_calculadora):
                 tab_calculadora_content()
             with ui.tab_panel(tab_metricas):
-                tab_metricas_content()
+                await tab_metricas_content()
             with ui.tab_panel(tab_respaldo):
                 tab_respaldo_content()
 
+    boton_volver_dashboard()
     boton_cerrar_sesion()

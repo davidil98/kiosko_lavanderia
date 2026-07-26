@@ -24,6 +24,10 @@ TIPO_MAQUINA_ASIGNADA = "orden.maquina_asignada"
 TIPO_CICLO_INICIADO = "orden.ciclo_iniciado"
 TIPO_ORDEN_FINALIZADA = "orden.finalizada"
 TIPO_ORDEN_CANCELADA = "orden.cancelada"
+TIPO_MAQUINA_LIBERADA = "maquina.liberada"
+TIPO_MAQUINA_PAUSADA = "maquina.pausada"
+TIPO_MAQUINA_REANUDADA = "maquina.reanudada"
+TIPO_ETAPA_KANBAN_CAMBIADA = "kanban.etapa_cambiada"
 
 
 @dataclass(frozen=True)
@@ -78,6 +82,33 @@ def orden_cancelada(orden_id: int, **extra) -> EventoDominio:
     return EventoDominio(TIPO_ORDEN_CANCELADA, orden_id, dict(extra), datetime.now())
 
 
+def maquina_liberada(orden_id: int, codigo: str, **extra) -> EventoDominio:
+    return EventoDominio(
+        TIPO_MAQUINA_LIBERADA, orden_id, {"codigo": codigo, **extra}, datetime.now()
+    )
+
+
+def maquina_pausada(orden_id: int, codigo: str, **extra) -> EventoDominio:
+    return EventoDominio(
+        TIPO_MAQUINA_PAUSADA, orden_id, {"codigo": codigo, **extra}, datetime.now()
+    )
+
+
+def maquina_reanudada(orden_id: int, codigo: str, **extra) -> EventoDominio:
+    return EventoDominio(
+        TIPO_MAQUINA_REANUDADA, orden_id, {"codigo": codigo, **extra}, datetime.now()
+    )
+
+
+def etapa_kanban_cambiada(orden_id: int, nueva_etapa: str, **extra) -> EventoDominio:
+    return EventoDominio(
+        TIPO_ETAPA_KANBAN_CAMBIADA,
+        orden_id,
+        {"nueva_etapa": nueva_etapa, **extra},
+        datetime.now(),
+    )
+
+
 TODOS_LOS_TIPOS = frozenset(
     {
         TIPO_ORDEN_CREADA,
@@ -89,5 +120,9 @@ TODOS_LOS_TIPOS = frozenset(
         TIPO_CICLO_INICIADO,
         TIPO_ORDEN_FINALIZADA,
         TIPO_ORDEN_CANCELADA,
+        TIPO_MAQUINA_LIBERADA,
+        TIPO_MAQUINA_PAUSADA,
+        TIPO_MAQUINA_REANUDADA,
+        TIPO_ETAPA_KANBAN_CAMBIADA,
     }
 )

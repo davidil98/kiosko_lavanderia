@@ -67,20 +67,22 @@ from app.ui.admin import dashboard as admin_dashboard
 TEST_MODE = "test" in sys.argv
 
 
-def _favicon_data_url() -> str:
-    """Favicon pequeño. El dataURL de un PNG de 100KB inflaba el HTML
-    inicial y rompía el WebSocket de NiceGUI con 'Message too long'.
-    Usamos un emoji Unicode (4 bytes) que se envía inline."""
-    return "🌙"
-
-
 def _bootstrap() -> None:
-    """Carga la DB, los catálogos y arranca hardware + polling."""
+    """Carga la DB, los catálogos y arranca hardware + polling.
+
+    También limpia el wizard del kiosko en storage para que el cliente
+    siempre empiece desde el paso SERVICIO al reiniciar la Pi.
+    Si el apagón fue en medio de un pago Point, el polling de MP retomará
+    las órdenes PENDIENTE_PAGO que ya estaban persistidas en la DB.
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     db.init_db()
     loader.instalar_como_defaults()
     # Cargar catálogo de máquinas (cache en memoria)
     set_cargador(lambda: _cargar_equipos())
+    # Resetear wizard: el estado del cliente no debe persistir entre
+    # reinicios del servidor. Las órdenes en curso se recuperan de la DB.
+    app.storage.general.pop("kiosko_wizard", None)
 
 
 def _cargar_equipos() -> dict:
@@ -155,7 +157,22 @@ async def _on_startup() -> None:
     _bootstrap()
     _arrancar_monedero()
     init_gpio_lavadoras()
+    _cargar_estado_maquinas()
     _arrancar_polling_mp()
+
+
+def _cargar_estado_maquinas() -> None:
+    """Reconstruye el estado global de máquinas desde la BD y reprograma
+    auto-apagados para sostenidas. Llamado en on_startup tras un reinicio."""
+    from app.core import estado_maquinas as em
+    from app.adaptadores.hardware import maquinas_pin
+    from app.repo import maquinas as repo_maquinas
+    from app.repo import transacciones
+
+    maquinas = repo_maquinas._listar(solo_activas=False)
+    en_curso = transacciones._listar_en_proceso()
+    em.cargar_desde_bd(maquinas, en_curso)
+    em.reprogramar_auto_apagados(maquinas_pin._auto_apagar)
 
 
 @app.on_shutdown
@@ -187,6 +204,7 @@ def main() -> None:
     from app.ui.admin import autoservicio as _admin_autoservicio
     from app.ui.admin import personalizado as _admin_personalizado
     from app.ui.admin import cortes as _admin_cortes
+    from app.ui.admin import maquinas as _admin_maquinas
     from app.ui.admin.superadmin import pagina as _admin_superadmin
 
     _ = (
@@ -206,11 +224,7 @@ def main() -> None:
         ui.run(
             title=TITLE,
             port=PORT,
-            # El favicon .ico (16/32/48) lo sirve /static, no un emoji
-            # dataURL que inflaba el HTML inicial.
-            favicon="/static/favicon.ico"
-            if (STATIC_DIR / "favicon.ico").exists()
-            else _favicon_data_url(),
+            favicon=str(STATIC_DIR / "favicon.ico"),
             # El primer patch del WebSocket del kiosko puede ser grande.
             # Subimos el límite de 1MB (default de Starlette) a 10MB
             # para que "Message too long" no rompa el primer render.

@@ -53,8 +53,6 @@ class Bus:
                 q.put_nowait(evento)
                 recibidos += 1
             except asyncio.QueueFull:
-                # El suscriptor está saturado. No bloqueamos al publicador.
-                # Si necesita garantía, que use `publish_async` o un buffer mayor.
                 pass
         return recibidos
 

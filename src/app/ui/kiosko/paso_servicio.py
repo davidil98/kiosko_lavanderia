@@ -24,10 +24,11 @@ def _format_precio(tipo_calculo: str, precio_fijo: int, tarifa_por_kg: float) ->
 
 
 def render_paso_servicio(wizard: WizardKiosko, refresh) -> None:
-    if wizard.sub is Sub.SUB_LAVAR:
+    if wizard.sub == Sub.SUB_LAVAR:
         _render_sub_menu_lavar(wizard, refresh)
     else:
         _render_menu_principal(wizard, refresh)
+
 
 
 def _render_menu_principal(wizard: WizardKiosko, refresh) -> None:
